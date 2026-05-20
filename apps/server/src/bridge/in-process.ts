@@ -1,6 +1,5 @@
 import {
 	createAgentSession,
-	discoverAuthStorage,
 	ModelRegistry,
 	SessionManager,
 	settings as ompSettings,
@@ -27,6 +26,7 @@ import type {
 } from "@omp-deck/protocol";
 
 import { logger } from "../log.ts";
+import { getDeckModelRegistry } from "../auth-singleton.ts";
 import type {
 	AgentBridge,
 	CreateSessionOpts,
@@ -188,14 +188,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		if (this.modelRegistry) return Promise.resolve(this.modelRegistry);
 		if (this.modelRegistryPromise) return this.modelRegistryPromise;
 		this.modelRegistryPromise = (async () => {
-			const auth = await discoverAuthStorage();
-			const registry = new ModelRegistry(auth);
-			// `cache` reads models.json + built-ins synchronously without hitting
-			// each provider's discovery endpoint — fast deck boot; background
-			// refresh runs after the registry is reachable so the catalog stays
-			// fresh without blocking the first model lookup.
-			await registry.refresh("offline");
-			registry.refreshInBackground("online");
+			const registry = await getDeckModelRegistry();
 			this.modelRegistry = registry;
 			return registry;
 		})();

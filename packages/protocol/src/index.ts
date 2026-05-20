@@ -337,6 +337,31 @@ export type ServerFrame =
 	| { type: "session_disposed"; sessionId: string }
 	/** Broadcast frame: any kanban-task mutation occurred. Clients refetch. */
 	| { type: "tasks_changed" }
+	/** OAuth: SDK has produced the consent URL; client opens it in a new tab. */
+	| {
+			type: "oauth_consent";
+			flowId: string;
+			provider: string;
+			url: string;
+			instructions?: string;
+		}
+	/** OAuth: SDK status update (e.g. "Waiting for browser authentication…"). */
+	| { type: "oauth_progress"; flowId: string; provider: string; message: string }
+	/** OAuth: SDK is asking the user a free-form question (enterprise URL, etc). */
+	| {
+			type: "oauth_prompt";
+			flowId: string;
+			provider: string;
+			promptId: string;
+			message: string;
+			placeholder?: string;
+		}
+	/** OAuth: login resolved successfully; client should refetch providers + models. */
+	| { type: "oauth_complete"; flowId: string; provider: string }
+	/** OAuth: login rejected (timeout, port collision, state mismatch, user cancel). */
+	| { type: "oauth_failed"; flowId: string; provider: string; message: string }
+	/** Broadcast: model registry availability changed (post-login / post-revoke). */
+	| { type: "models_changed" }
 	| { type: "error"; sessionId?: string; error: string };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -596,4 +621,45 @@ export interface ListFilePathsResponse {
 	matches: FilePathMatch[];
 	/** `true` when the underlying file list was served from a cached snapshot. */
 	cached: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth providers / OAuth login flow (driven from Settings → Providers)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ProviderAuthState = "oauth" | "api-key" | "unconfigured";
+
+export interface ProviderInfo {
+	id: string;
+	name: string;
+	state: ProviderAuthState;
+	/** Number of credentials stored for the provider (1 typical; >1 for round-robin). */
+	count: number;
+}
+
+export interface ListProvidersResponse {
+	providers: ProviderInfo[];
+}
+
+/**
+ * `POST /api/auth/oauth/:provider/start` response. The deck blocks the
+ * response until the SDK fires `onAuth`, so by the time the client sees
+ * this it has a real consent URL to open. WS frames keyed by `flowId`
+ * deliver subsequent state transitions.
+ */
+export interface StartOAuthResponse {
+	flowId: string;
+	url: string;
+	instructions?: string;
+}
+
+/** Client → deck: paste the redirect URL or raw `code` from the browser. */
+export interface OAuthManualCodeRequest {
+	code: string;
+}
+
+/** Client → deck: reply to a mid-flow `onPrompt` request from the SDK. */
+export interface OAuthPromptReplyRequest {
+	promptId: string;
+	answer: string;
 }

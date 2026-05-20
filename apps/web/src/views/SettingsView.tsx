@@ -2,18 +2,22 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Play, RotateCcw, Save, Square, X } from "lucide-react";
 import type { BridgeInfo, BridgeName, EnvEntry, ListEnvSettingsResponse } from "@omp-deck/protocol";
+import type { ProviderInfo } from "@omp-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { OAuthFlowModal } from "@/components/settings/OAuthFlowModal";
 import { bridgesApi } from "@/lib/bridges-api";
 import { settingsApi } from "@/lib/settings-api";
+import { authApi } from "@/lib/auth-api";
 import { THEMES, useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 const SECTIONS = [
 	{ id: "env", label: "Env", description: "Process and deck-managed variables" },
+	{ id: "providers", label: "Providers", description: "OAuth sign-in and API-key state" },
 	{ id: "messaging", label: "Messaging", description: "Telegram and future chat bridges" },
 	{ id: "appearance", label: "Appearance", description: "Themes, colors, fonts" },
 	{ id: "workspaces", label: "Workspaces", description: "Pinned roots and display names" },
@@ -65,6 +69,8 @@ export function SettingsView() {
 						<section className="min-h-0 overflow-auto p-4">
 							{selected === "env" ? (
 								<EnvSection />
+							) : selected === "providers" ? (
+								<ProvidersSection />
 							) : selected === "messaging" ? (
 								<MessagingSection />
 							) : selected === "appearance" ? (
@@ -816,4 +822,170 @@ function formatUptime(startedIso: string): string {
 	if (hours < 24) return `${hours}h${minutes % 60}m`;
 	const days = Math.floor(hours / 24);
 	return `${days}d${hours % 24}h`;
+}
+
+/**
+ * Providers section — list every OAuth-capable provider with its current
+ * auth state. Login opens OAuthFlowModal; Revoke clears credentials and
+ * fires `models_changed` server-side so the picker re-empties without a
+ * deck restart. See docs/oauth-deck-sdk-findings.md for the SDK contract.
+ */
+function ProvidersSection() {
+	const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
+	const [error, setError] = useState<string | undefined>();
+	const [loading, setLoading] = useState(true);
+	const [activeFlow, setActiveFlow] = useState<{ id: string; name: string } | null>(null);
+	const [confirmRevoke, setConfirmRevoke] = useState<{ id: string; name: string } | null>(null);
+	const [revoking, setRevoking] = useState(false);
+
+	async function refresh(): Promise<void> {
+		try {
+			const resp = await authApi.listProviders();
+			setProviders(resp.providers);
+			setError(undefined);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	useEffect(() => {
+		void refresh();
+	}, []);
+
+	async function revoke(): Promise<void> {
+		if (!confirmRevoke) return;
+		setRevoking(true);
+		try {
+			await authApi.revoke(confirmRevoke.id);
+			setConfirmRevoke(null);
+			await refresh();
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setRevoking(false);
+		}
+	}
+
+	if (loading) {
+		return <div className="font-mono text-2xs text-ink-3">Loading providers…</div>;
+	}
+	if (error) {
+		return (
+			<div className="rounded border border-danger/40 bg-danger/5 p-3 text-xs text-danger">
+				{error}
+			</div>
+		);
+	}
+	if (!providers) return null;
+
+	return (
+		<div className="flex flex-col gap-4">
+			<div>
+				<h2 className="meta">Providers</h2>
+				<p className="mt-1 text-xs text-ink-3">
+					OAuth sign-in to subscription providers (Claude Pro/Max, ChatGPT Plus/Pro, etc.).
+					API keys live under <strong>Env</strong> — this surface is for browser-flow auth.
+				</p>
+			</div>
+			<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+				{providers.map((p) => (
+					<ProviderCard
+						key={p.id}
+						info={p}
+						onLogin={() => setActiveFlow({ id: p.id, name: p.name })}
+						onRevoke={() => setConfirmRevoke({ id: p.id, name: p.name })}
+					/>
+				))}
+			</div>
+			<OAuthFlowModal
+				open={activeFlow !== null}
+				provider={activeFlow?.id ?? null}
+				providerName={activeFlow?.name ?? null}
+				onClose={() => setActiveFlow(null)}
+				onComplete={() => {
+					setActiveFlow(null);
+					void refresh();
+				}}
+			/>
+			<Modal open={confirmRevoke !== null} onClose={() => setConfirmRevoke(null)} widthClass="max-w-md">
+				<div className="flex flex-col gap-3 p-5">
+					<h2 className="text-base font-semibold text-ink">
+						Sign out of {confirmRevoke?.name}?
+					</h2>
+					<p className="text-xs text-ink-3">
+						The stored credentials will be deleted from <code>auth.db</code>. Token refresh
+						will fail until you log in again. Other deck instances sharing the same
+						<code>OMP_AGENT_DIR</code> will lose access too.
+					</p>
+					<div className="flex justify-end gap-2 border-t border-line pt-3">
+						<Button variant="ghost" onClick={() => setConfirmRevoke(null)} disabled={revoking}>
+							Cancel
+						</Button>
+						<Button variant="danger" onClick={revoke} disabled={revoking}>
+							{revoking ? "Signing out…" : "Sign out"}
+						</Button>
+					</div>
+				</div>
+			</Modal>
+		</div>
+	);
+}
+
+function ProviderCard({
+	info,
+	onLogin,
+	onRevoke,
+}: {
+	info: ProviderInfo;
+	onLogin: () => void;
+	onRevoke: () => void;
+}) {
+	const tone =
+		info.state === "oauth"
+			? "border-success/40 bg-success/5"
+			: info.state === "api-key"
+				? "border-accent/30 bg-accent-soft/40"
+				: "border-line bg-paper-2/30";
+	const stateLabel =
+		info.state === "oauth"
+			? "OAuth (subscription)"
+			: info.state === "api-key"
+				? "API key configured"
+				: "Not configured";
+	return (
+		<div className={cn("flex flex-col gap-2 rounded border p-3", tone)}>
+			<div className="flex items-baseline justify-between gap-2">
+				<div className="truncate text-sm font-medium text-ink" title={info.name}>
+					{info.name}
+				</div>
+				<Badge>{stateLabel}</Badge>
+			</div>
+			<div className="font-mono text-2xs text-ink-4">
+				{info.id}
+				{info.count > 1 ? <span className="ml-1.5">· {info.count} credentials</span> : null}
+			</div>
+			<div className="mt-1 flex gap-2">
+				{info.state === "unconfigured" ? (
+					<Button variant="primary" onClick={onLogin} className="flex-1">
+						Login
+					</Button>
+				) : info.state === "oauth" ? (
+					<>
+						<Button variant="outline" onClick={onLogin} className="flex-1">
+							Replace
+						</Button>
+						<Button variant="ghost" onClick={onRevoke}>
+							Sign out
+						</Button>
+					</>
+				) : (
+					<Button variant="outline" onClick={onLogin} className="flex-1">
+						Login (replaces API key)
+					</Button>
+				)}
+			</div>
+		</div>
+	);
 }

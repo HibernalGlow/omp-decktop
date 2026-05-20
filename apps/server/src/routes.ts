@@ -24,6 +24,7 @@ import { buildSlashCommandsRouter } from "./routes-slash-commands.ts";
 import { buildFsRouter } from "./routes-fs.ts";
 import { buildBridgesRouter } from "./routes-bridges.ts";
 import { buildMarketplaceRouter } from "./routes-marketplace.ts";
+import { buildAuthOAuthRouter } from "./routes-auth-oauth.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
 import type { BridgeSupervisor } from "./bridge-supervisor.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";
@@ -219,6 +220,7 @@ export function buildRouter(
 	app.route("/", buildSettingsRouter(bridge, config, opts));
 	app.route("/", buildBridgesRouter(supervisor));
 	app.route("/", buildMarketplaceRouter(marketplace));
+	app.route("/auth/oauth", buildAuthOAuthRouter());
 
 	return app;
 }

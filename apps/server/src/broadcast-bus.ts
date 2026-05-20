@@ -9,7 +9,16 @@ import type { ServerFrame } from "@omp-deck/protocol";
  * This decouples mutation sites from transport — `routes-tasks.ts` does not
  * import the hub, and the hub does not import every route module.
  */
-export type BroadcastFrame = Extract<ServerFrame, { type: "tasks_changed" }>;
+export type BroadcastFrame = Extract<
+	ServerFrame,
+	| { type: "tasks_changed" }
+	| { type: "oauth_consent" }
+	| { type: "oauth_progress" }
+	| { type: "oauth_prompt" }
+	| { type: "oauth_complete" }
+	| { type: "oauth_failed" }
+	| { type: "models_changed" }
+>;
 
 type Listener = (frame: BroadcastFrame) => void;
 

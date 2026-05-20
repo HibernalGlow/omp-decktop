@@ -26,6 +26,7 @@ apps/bridges/*/dist
 
 # Smoke / spawn helpers and captured logs
 .logs
+.deck-data
 orgd-stdout.log
 vite.err.log
 vite.out.log
