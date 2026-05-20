@@ -34,6 +34,61 @@ bun run dev:web
 
 The telegram bridge only runs on demand (Settings → Messaging → Start, or `bun run dev:telegram`).
 
+## Developing without disrupting your daily-driver deck
+
+`bun --hot` re-evaluates `apps/server/src/index.ts` on every save and Vite
+hot-reloads `apps/web/src/**` in place. That's great for the inner loop but
+it also means a single working tree can't host a "production" deck you're
+using and a "dev" deck you're iterating on simultaneously — every edit
+bounces the deck you're chatting in.
+
+The fix is a parallel checkout via `git worktree`, env-isolated:
+
+```sh
+# from the existing checkout
+git worktree add ../omp-deck-dev -b dev/<feature>
+cd ../omp-deck-dev
+bun install
+cat > .env <<'EOF'
+OMP_DECK_PORT=8889
+OMP_DECK_WEB_PORT=5273
+OMP_DECK_DB_PATH=$PWD/apps/server/data/deck.dev.db
+OMP_DECK_DATA_DIR=$PWD/.deck-data
+EOF
+bun run dev      # dev deck lives at http://127.0.0.1:5273
+```
+
+The two instances now share **history only**. Five env vars give you full
+state separation:
+
+| Concern                  | prod tree            | dev worktree                     |
+| ------------------------ | -------------------- | -------------------------------- |
+| Server port              | `OMP_DECK_PORT=8787` | `OMP_DECK_PORT=8889`             |
+| Web (Vite) port          | `5173`               | `OMP_DECK_WEB_PORT=5273`         |
+| Kanban / inbox / routines| `deck.db`            | `deck.dev.db`                    |
+| Managed `.env`, audit log| default `DATA_DIR`   | `OMP_DECK_DATA_DIR=.deck-data`   |
+| OAuth credentials + sessions | `~/.omp/agent/`  | same by default; set `OMP_AGENT_DIR` to isolate when testing the OAuth flow itself |
+
+Leave `OMP_AGENT_DIR` unset for routine dev so you don't re-login to Claude /
+Codex on every dev iteration. Set it to a fresh dir only when the change
+under test touches `auth.db` and you need to repeatedly clear the
+no-credentials state.
+
+Merge the branch back when ready; `git worktree remove ../omp-deck-dev`
+tears down the tree but keeps the branch and its commits.
+
+### What survives vs. dies on restart
+
+Survives on disk: tasks, inbox, routines, run history, session transcripts,
+auth credentials, settings.
+
+Dies on server restart: in-flight WS streams, in-progress agent turns,
+in-memory session caches, half-completed OAuth flows (the SDK's loopback
+listener is the recipient — losing the process loses the listener).
+
+That's exactly why the worktree pattern matters: your "I'm using it right
+now" deck only restarts when **you** decide to merge and bounce it.
+
 ## Code quality
 
 - `bun run typecheck` must pass before opening a PR.
