@@ -25,6 +25,10 @@ import { startKbWatcher } from "./kb-watcher.ts";
 import { installStarterSkills } from "./starter-skills.ts";
 import { installStarterExtensions } from "./starter-extensions.ts";
 import { buildDefaultBridgeSupervisor } from "./bridge-supervisor.ts";
+import {
+	BrowserNotificationChannel,
+	notificationService,
+} from "./notifications/index.ts";
 import type { RestartServerResponse } from "@omp-deck/protocol";
 
 const log = logger("server");
@@ -58,6 +62,11 @@ async function main(): Promise<void> {
 	// is safe on every boot. Disable with OMP_DECK_INSTALL_STARTER_SKILLS=0.
 	await installStarterSkills();
 	await installStarterExtensions();
+
+	// Register the default browser notification channel. It broadcasts a
+	// `notification` ServerFrame to every connected web client. Future channels
+	// (telegram, email, push) self-register here without engine changes.
+	notificationService.register(new BrowserNotificationChannel());
 
 
 	const bridge = new InProcessAgentBridge({

@@ -741,7 +741,56 @@ export type ServerFrame =
 			dialogId: string;
 			reason: "session_disposed" | "timeout" | "aborted";
 	  }
+	/**
+	 * Server liveness heartbeat. Broadcast on a fixed interval (default 5s).
+	 * Clients use the gap between consecutive heartbeats to drive a connection
+	 * indicator. `serverStartedAt` lets clients detect a restart even when the
+	 * WebSocket auto-reconnects: a fresh value means the server bounced.
+	 */
+	| {
+			type: "heartbeat";
+			serverStartedAt: string;
+			pid: number;
+			uptimeSecs: number;
+			buildSha: string | null;
+			version: string;
+			timestamp: string;
+	  }
+	/**
+	 * User-facing notification. Emitted by the deck's `NotificationService` for
+	 * routine failures, budget breaches, suspended approval prompts, and any
+	 * other surface that opts in. Browser-channel deliver()s push these frames
+	 * to every connected client; the web layer renders an OS-level
+	 * `Notification` (when permission granted) plus an audio cue.
+	 */
+	| {
+			type: "notification";
+			id: string;
+			level: NotificationLevel;
+			title: string;
+			body?: string;
+			sound?: boolean;
+			source?: string;
+			actionUrl?: string;
+			timestamp: string;
+	  }
 	| { type: "error"; sessionId?: string; error: string };
+
+/** Severity for a deck notification. Drives the audio tone + visual styling. */
+export type NotificationLevel = "info" | "warn" | "error" | "critical";
+
+/** Payload accepted by `NotificationService.notify` on the server. */
+export interface NotificationPayload {
+	level: NotificationLevel;
+	title: string;
+	body?: string;
+	/** Default true for `warn` and above; explicit false suppresses the tone. */
+	sound?: boolean;
+	/** Free-form origin tag, e.g. `routine:<routineId>/run:<runId>`. */
+	source?: string;
+	/** Optional deep-link the user can click to jump to the relevant view. */
+	actionUrl?: string;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool-call rendering hints (used by the web app to pick a renderer)

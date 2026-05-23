@@ -4,6 +4,7 @@ import type { ClientFrame, ServerFrame } from "@omp-deck/protocol";
 import type { AgentBridge } from "./bridge/types.ts";
 import { broadcastBus } from "./broadcast-bus.ts";
 import { logger } from "./log.ts";
+import { getBuildInfo, getUptimeSecs } from "./build-info.ts";
 const log = logger("ws");
 
 /** Per-connection state. */
@@ -12,11 +13,48 @@ export interface ConnectionData {
 	subscriptions: Map<string, () => void>;
 }
 
+/**
+ * Interval between heartbeat broadcasts, in milliseconds. The web client
+ * expects roughly one frame per 5s; missed frames (>15s gap) drive the
+ * "disconnected" indicator.
+ */
+export const HEARTBEAT_INTERVAL_MS = 5000;
+
 export class WsHub {
 	private readonly connections = new Set<ServerWebSocket<ConnectionData>>();
+	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 	constructor(private bridge: AgentBridge) {
 		broadcastBus.subscribe((frame) => this.broadcast(frame));
+		this.startHeartbeat();
+	}
+
+	private startHeartbeat(): void {
+		if (this.heartbeatTimer) return;
+		this.heartbeatTimer = setInterval(() => {
+			const info = getBuildInfo();
+			// Push through the shared bus so any subscriber (the hub itself, future
+			// telemetry, tests) sees the frame, not just connected WS sockets.
+			broadcastBus.broadcast({
+				type: "heartbeat",
+				serverStartedAt: info.serverStartedAt,
+				pid: info.pid,
+				uptimeSecs: getUptimeSecs(),
+				buildSha: info.buildSha,
+				version: info.version,
+				timestamp: new Date().toISOString(),
+			});
+		}, HEARTBEAT_INTERVAL_MS);
+		// Don't keep the event loop alive solely for heartbeats.
+		this.heartbeatTimer.unref?.();
+	}
+
+	/** For tests + clean shutdown. After dispose, no more heartbeats fire. */
+	dispose(): void {
+		if (this.heartbeatTimer) {
+			clearInterval(this.heartbeatTimer);
+			this.heartbeatTimer = null;
+		}
 	}
 
 	createConnectionData(): ConnectionData {

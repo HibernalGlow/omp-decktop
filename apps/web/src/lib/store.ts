@@ -5,10 +5,33 @@ import type {
 	ExtUiDialogResponse,
 	ListSessionsResponse,
 	ListWorkspacesResponse,
+	NotificationLevel,
 	SessionSummary,
 	ServerFrame,
 	WorkspaceEntry,
 } from "@omp-deck/protocol";
+
+/**
+ * In-app notification record. Mirrors the wire frame plus client-side
+ * metadata: `receivedAtMs` for ordering, `deliveredOs` so the OS-level
+ * Notification renderer only fires once per item.
+ */
+export interface NotificationItem {
+	id: string;
+	level: NotificationLevel;
+	title: string;
+	body?: string;
+	sound?: boolean;
+	source?: string;
+	actionUrl?: string;
+	timestamp: string;
+	receivedAtMs: number;
+	deliveredOs: boolean;
+	dismissed: boolean;
+}
+
+/** Max notifications retained in the in-app queue. Older items fall off. */
+const MAX_NOTIFICATIONS = 50;
 
 import { api } from "./api";
 import { applyEvent, initSession } from "./reducer";
@@ -105,6 +128,29 @@ interface StoreState {
 	 */
 	pendingDialogs: Record<string, Extract<ServerFrame, { type: "ext_ui_dialog_open" }>>;
 
+	/**
+	 * Latest heartbeat the server has broadcast. `lastHeartbeatAt` is the
+	 * client's local Date.now() at the moment we received the frame, NOT the
+	 * server's `timestamp` — the gap drives the connection indicator and must
+	 * be measured in the client's clock.
+	 */
+	heartbeat: {
+		lastReceivedAtMs: number;
+		serverStartedAt: string;
+		pid: number;
+		uptimeSecs: number;
+		buildSha: string | null;
+		version: string;
+	} | null;
+
+	/**
+	 * In-app notification queue. Each `notification` frame is appended; the
+	 * notification renderer pops from here when delivering an OS notification
+	 * + audio cue, and a small toast surface reads from here too. Capped at
+	 * MAX_NOTIFICATIONS via prune; oldest fall off.
+	 */
+	notifications: NotificationItem[];
+
 	// ─── Actions ─────────────────────────────────────────────────────────
 	bootstrap(): Promise<void>;
 	connect(): void;
@@ -124,6 +170,10 @@ interface StoreState {
 	setInspectorOpen(open: boolean): void;
 	/** Send a dialog response over the WS and clear it locally. */
 	respondToExtUiDialog(sessionId: string, dialogId: string, response: ExtUiDialogResponse): void;
+	/** Mark a notification as delivered to the OS so the renderer only fires once. */
+	markNotificationDelivered(id: string): void;
+	/** Hide an in-app toast for a notification (does not affect an already-delivered OS notif). */
+	dismissNotification(id: string): void;
 }
 
 export const useStore = create<StoreState>()(
@@ -140,6 +190,8 @@ export const useStore = create<StoreState>()(
 		skillsChangeCounter: 0,
 		kbChangeCounter: 0,
 		pendingDialogs: {},
+		heartbeat: null,
+		notifications: [],
 		// Hydrate chrome state from localStorage at module init so first render
 		// matches the user's last preference — but only on desktop. On mobile the
 		// panels are overlay drawers and always start closed.
@@ -309,6 +361,30 @@ export const useStore = create<StoreState>()(
 				...response,
 			});
 		},
+
+		markNotificationDelivered(id) {
+			set((s) => {
+				const i = s.notifications.findIndex((n) => n.id === id);
+				if (i < 0 || s.notifications[i]?.deliveredOs) return {};
+				const next = s.notifications.slice();
+				const target = next[i];
+				if (!target) return {};
+				next[i] = { ...target, deliveredOs: true };
+				return { notifications: next };
+			});
+		},
+
+		dismissNotification(id) {
+			set((s) => {
+				const i = s.notifications.findIndex((n) => n.id === id);
+				if (i < 0 || s.notifications[i]?.dismissed) return {};
+				const next = s.notifications.slice();
+				const target = next[i];
+				if (!target) return {};
+				next[i] = { ...target, dismissed: true };
+				return { notifications: next };
+			});
+		},
 	})),
 );
 
@@ -403,6 +479,43 @@ function handleFrame(
 						[id]: { ...prev, lastError: frame.error },
 					},
 				};
+			});
+			return;
+
+		case "heartbeat":
+			set(() => ({
+				heartbeat: {
+					lastReceivedAtMs: Date.now(),
+					serverStartedAt: frame.serverStartedAt,
+					pid: frame.pid,
+					uptimeSecs: frame.uptimeSecs,
+					buildSha: frame.buildSha,
+					version: frame.version,
+				},
+			}));
+			return;
+
+		case "notification":
+			set((s) => {
+				// Dedupe by id: server may re-send on reconnect.
+				if (s.notifications.some((n) => n.id === frame.id)) return {};
+				const item: NotificationItem = {
+					id: frame.id,
+					level: frame.level,
+					title: frame.title,
+					timestamp: frame.timestamp,
+					receivedAtMs: Date.now(),
+					deliveredOs: false,
+					dismissed: false,
+				};
+				if (frame.body !== undefined) item.body = frame.body;
+				if (frame.sound !== undefined) item.sound = frame.sound;
+				if (frame.source !== undefined) item.source = frame.source;
+				if (frame.actionUrl !== undefined) item.actionUrl = frame.actionUrl;
+				const next = [...s.notifications, item];
+				// Cap retention; oldest fall off.
+				if (next.length > MAX_NOTIFICATIONS) next.splice(0, next.length - MAX_NOTIFICATIONS);
+				return { notifications: next };
 			});
 			return;
 

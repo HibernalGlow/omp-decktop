@@ -3,6 +3,7 @@ import { NavRail } from "./NavRail";
 import { FoldVertical, Menu, PanelRight, UnfoldVertical, X } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { ConnectionIndicator } from "./ConnectionIndicator";
 
 interface Props {
 	sidebar: ReactNode;
@@ -50,6 +51,7 @@ export function Layout({ sidebar, main, inspector, topBar }: Props) {
 				</div>
 				<div className="ml-auto flex min-w-0 items-center gap-2 overflow-hidden">
 					<div className="hidden min-w-0 truncate sm:block">{topBar}</div>
+					<ConnectionIndicator />
 					<ToolCardsToggle />
 					<button
 						type="button"

@@ -11,6 +11,7 @@ import type {
 
 import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
+import { getBuildInfo, getUptimeSecs } from "./build-info.ts";
 import type { AgentBridge } from "./bridge/types.ts";
 
 const log = logger("routes");
@@ -47,14 +48,19 @@ export function buildRouter(
 ): Hono {
 	const app = new Hono();
 
-	app.get("/health", (c) =>
-		c.json({
+	app.get("/health", (c) => {
+		const info = getBuildInfo();
+		return c.json({
 			ok: true,
-			pid: process.pid,
+			pid: info.pid,
 			defaultCwd: config.defaultCwd,
 			extraWorkspaces: config.extraWorkspaces,
-		}),
-	);
+			serverStartedAt: info.serverStartedAt,
+			version: info.version,
+			buildSha: info.buildSha,
+			uptimeSecs: getUptimeSecs(),
+		});
+	});
 
 	app.get("/workspaces", async (c) => {
 		const allSessions = await bridge.listSessions({});

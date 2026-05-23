@@ -32,6 +32,7 @@ import type {
 } from "@omp-deck/protocol";
 
 import { broadcastBus } from "../broadcast-bus.ts";
+import { notificationService } from "../notifications/index.ts";
 import { finalizeRun, finishStepRun, insertSkippedStepRun, startStepRun } from "../db/routine-step-runs.ts";
 import { logger } from "../log.ts";
 import { accumulate, checkBudget, newBudgetState } from "./budget.ts";
@@ -322,6 +323,28 @@ export async function runV1Pipeline(input: {
 		finalizePatch.error = abortReason ? `aborted: ${abortReason}` : null;
 	}
 	finalizeRun(runId, finalizePatch);
+
+	// Push a notification when the run ended badly. Success is silent on
+	// purpose — successful unattended routines should not buzz the user.
+	if (finalStatus !== "success") {
+		const level: "warn" | "error" = abortReason === "budget" ? "warn" : "error";
+		const reasonLabel = abortReason === "budget"
+			? "budget cap"
+			: abortReason === "cancelled"
+			? "cancelled"
+			: abortReason === "timeout"
+			? "timed out"
+			: abortReason ?? "failed";
+		void notificationService.notify({
+			level,
+			title: `routine "${routine.name}" ${reasonLabel}`,
+			body: stepCountFailed > 0
+				? `${stepCountFailed} step(s) failed out of ${stepCountTotal}`
+				: undefined,
+			source: `routine:${routine.id}/run:${runId}`,
+			actionUrl: `/routines/${routine.id}/runs/${runId}`,
+		});
+	}
 
 	broadcast({
 		type: "routine_run_finished",
