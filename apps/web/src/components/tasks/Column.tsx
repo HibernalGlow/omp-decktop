@@ -1,7 +1,11 @@
 import { useState } from "react";
-import { useDroppable } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { Plus } from "lucide-react";
+import {
+	SortableContext,
+	useSortable,
+	verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical, Plus } from "lucide-react";
 import type { Task, TaskState } from "@omp-deck/protocol";
 import { cn } from "@/lib/utils";
 import { TaskCard } from "./TaskCard";
@@ -12,10 +16,47 @@ interface Props {
 	onCreate: (stateId: string, title: string) => void;
 	onOpen: (task: Task) => void;
 	onRenameRequest?: (state: TaskState) => void;
+	isDraggingColumns: boolean;
 }
 
-export function Column({ state, tasks, onCreate, onOpen, onRenameRequest }: Props) {
-	const { setNodeRef, isOver } = useDroppable({ id: state.id, data: { stateId: state.id } });
+/**
+ * One kanban column.
+ *
+ * `useSortable` makes the column itself a drag source within the horizontal
+ * `SortableContext` in `TasksView`; `data: { type: "column" }` is what
+ * `onDragStart` / `onDragEnd` branch on to tell column reorders apart from
+ * task drags. `useSortable` already registers the node as a droppable, so a
+ * task dragged onto a column body still lands here — no second `useDroppable`
+ * is needed.
+ *
+ * The drag handle is a dedicated `GripVertical` icon to the left of the color
+ * dot, NOT the whole header — that keeps click-to-rename working on the
+ * column name and avoids stealing pointer-down from card drags within the
+ * column.
+ */
+export function Column({
+	state,
+	tasks,
+	onCreate,
+	onOpen,
+	onRenameRequest,
+	isDraggingColumns,
+}: Props) {
+	const {
+		attributes,
+		listeners,
+		setNodeRef,
+		transform,
+		transition,
+		isDragging,
+		isOver,
+	} = useSortable({ id: state.id, data: { type: "column", stateId: state.id } });
+
+	const style: React.CSSProperties = {
+		transform: CSS.Translate.toString(transform),
+		transition,
+		opacity: isDragging ? 0.4 : undefined,
+	};
 
 	const [composing, setComposing] = useState(false);
 	const [draft, setDraft] = useState("");
@@ -31,16 +72,31 @@ export function Column({ state, tasks, onCreate, onOpen, onRenameRequest }: Prop
 		setComposing(false);
 	}
 
+	// Only highlight as a drop target while a task is being dragged. Column-vs-
+	// column drags get their own visual feedback from the sortable transform.
+	const showTaskDropHighlight = isOver && !isDragging && !isDraggingColumns;
+
 	return (
 		<div
 			ref={setNodeRef}
+			style={style}
 			className={cn(
 				"flex w-72 shrink-0 flex-col border-r border-line bg-paper transition-colors",
-				isOver && "bg-accent-soft/40 ring-1 ring-inset ring-accent/40",
+				showTaskDropHighlight && "bg-accent-soft/40 ring-1 ring-inset ring-accent/40",
 			)}
 		>
 			<div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-line bg-paper px-3 py-2">
-				<div className="flex items-center gap-2 min-w-0">
+				<div className="flex items-center gap-1.5 min-w-0">
+					<button
+						type="button"
+						{...attributes}
+						{...listeners}
+						className="cursor-grab touch-none text-ink-4 hover:text-ink active:cursor-grabbing"
+						aria-label={`Drag to reorder column ${state.name}`}
+						title="Drag to reorder"
+					>
+						<GripVertical className="h-3.5 w-3.5" />
+					</button>
 					<span
 						className="h-2 w-2 shrink-0 rounded-full"
 						style={{ backgroundColor: state.color }}

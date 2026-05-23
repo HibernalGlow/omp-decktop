@@ -9,6 +9,10 @@ import {
 	type DragEndEvent,
 	type DragStartEvent,
 } from "@dnd-kit/core";
+import {
+	SortableContext,
+	horizontalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { Settings2 } from "lucide-react";
 
 import type { Task, TaskState } from "@omp-deck/protocol";
@@ -41,6 +45,7 @@ export function TasksView() {
 		useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
 	);
 	const [draggingTask, setDraggingTask] = useState<Task | null>(null);
+	const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
 
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
@@ -104,6 +109,11 @@ export function TasksView() {
 	}
 
 	function onDragStart(ev: DragStartEvent): void {
+		const dragType = ev.active.data.current?.type as string | undefined;
+		if (dragType === "column") {
+			setDraggingColumnId(String(ev.active.id));
+			return;
+		}
 		const id = String(ev.active.id);
 		const t = tasks.find((x) => x.id === id);
 		if (t) setDraggingTask(t);
@@ -111,6 +121,37 @@ export function TasksView() {
 
 	async function onDragEnd(ev: DragEndEvent): Promise<void> {
 		const { active, over } = ev;
+		const dragType = active.data.current?.type as string | undefined;
+
+		if (dragType === "column") {
+			setDraggingColumnId(null);
+			if (!over || active.id === over.id) return;
+			const overType = over.data.current?.type as string | undefined;
+			// Only respond when dropped on another column node.
+			if (overType !== "column") return;
+			const fromIdx = states.findIndex((s) => s.id === active.id);
+			const toIdx = states.findIndex((s) => s.id === over.id);
+			if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+
+			const prevStates = states;
+			const nextStates = [...states];
+			const [moved] = nextStates.splice(fromIdx, 1);
+			if (!moved) return;
+			nextStates.splice(toIdx, 0, moved);
+			const orderedIds = nextStates.map((s) => s.id);
+			// Stamp optimistic positions so the UI sort key (`position ASC`) lines
+			// up with the new order before the server response arrives.
+			setStates(nextStates.map((s, i) => ({ ...s, position: (i + 1) * 100 })));
+			try {
+				const { states: confirmed } = await tasksApi.reorderStates(orderedIds);
+				setStates(confirmed);
+			} catch (e) {
+				setError(String(e));
+				setStates(prevStates);
+			}
+			return;
+		}
+
 		if (!over) {
 			setDraggingTask(null);
 			return;
@@ -178,6 +219,7 @@ export function TasksView() {
 
 	function onDragCancel(): void {
 		setDraggingTask(null);
+		setDraggingColumnId(null);
 	}
 
 	async function saveTask(patch: Parameters<typeof tasksApi.update>[1]): Promise<void> {
@@ -266,26 +308,32 @@ export function TasksView() {
 								onDragEnd={(ev) => void onDragEnd(ev)}
 								onDragCancel={onDragCancel}
 							>
-								<div className="flex flex-1 min-h-0 overflow-x-auto">
-									{states.map((s) => (
-										<Column
-											key={s.id}
-											state={s}
-											tasks={tasksByState[s.id] ?? []}
-											onCreate={(stateId, title) => void onCreate(stateId, title)}
-											onOpen={(t) => setOpenTask(t)}
-											onRenameRequest={() => {
-												setShowStateConfig(true);
-												setInspectorOpen(true);
-											}}
-										/>
-									))}
-									{states.length === 0 ? (
-										<div className="flex flex-1 items-center justify-center text-sm text-ink-3">
-											No columns. Open the column editor to add one.
-										</div>
-									) : null}
-								</div>
+								<SortableContext
+									items={states.map((s) => s.id)}
+									strategy={horizontalListSortingStrategy}
+								>
+									<div className="flex flex-1 min-h-0 overflow-x-auto">
+										{states.map((s) => (
+											<Column
+												key={s.id}
+												state={s}
+												tasks={tasksByState[s.id] ?? []}
+												onCreate={(stateId, title) => void onCreate(stateId, title)}
+												onOpen={(t) => setOpenTask(t)}
+												onRenameRequest={() => {
+													setShowStateConfig(true);
+													setInspectorOpen(true);
+												}}
+												isDraggingColumns={draggingColumnId !== null}
+											/>
+										))}
+										{states.length === 0 ? (
+											<div className="flex flex-1 items-center justify-center text-sm text-ink-3">
+												No columns. Open the column editor to add one.
+											</div>
+										) : null}
+									</div>
+								</SortableContext>
 								<DragOverlay
 									dropAnimation={{
 										duration: 200,
@@ -297,6 +345,26 @@ export function TasksView() {
 											<TaskCardBody task={draggingTask} lifted />
 										</div>
 									) : null}
+									{draggingColumnId ? (() => {
+										const s = states.find((x) => x.id === draggingColumnId);
+										if (!s) return null;
+										return (
+											<div className="w-72 border border-line-strong bg-paper/95 shadow-[0_12px_24px_-8px_rgba(26,24,20,0.35)] rotate-[1deg]">
+												<div className="flex items-center gap-1.5 border-b border-line px-3 py-2">
+													<span
+														className="h-2 w-2 shrink-0 rounded-full"
+														style={{ backgroundColor: s.color }}
+													/>
+													<span className="font-mono text-2xs uppercase tracking-meta text-ink-2">
+														{s.name}
+													</span>
+													<span className="font-mono text-2xs text-ink-4">
+														{(tasksByState[s.id] ?? []).length}
+													</span>
+												</div>
+											</div>
+										);
+									})() : null}
 								</DragOverlay>
 							</DndContext>
 						)}
