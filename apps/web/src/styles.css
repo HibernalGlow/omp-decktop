@@ -325,6 +325,9 @@
 	.markdown th {
 		@apply bg-paper-3 font-medium;
 	}
+	.markdown img {
+		@apply my-2 max-w-full h-auto rounded-md border border-line bg-paper-2;
+	}
 }
 
 /* Streaming caret — subtle, monospace block to feel terminal-adjacent. */

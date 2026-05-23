@@ -27,6 +27,7 @@ import { buildBridgesRouter } from "./routes-bridges.ts";
 import { buildMarketplaceRouter } from "./routes-marketplace.ts";
 import { buildSkillsRouter } from "./routes-skills.ts";
 import { buildKbRouter } from "./routes-kb.ts";
+import { buildUploadsRouter } from "./routes-uploads.ts";
 import { buildAuthOAuthRouter } from "./routes-auth-oauth.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
 import type { BridgeSupervisor } from "./bridge-supervisor.ts";
@@ -219,6 +220,7 @@ export function buildRouter(
 	});
 
 	app.route("/", buildTasksRouter());
+	app.route("/", buildUploadsRouter({ uploadsRoot: config.uploadsRoot }));
 	app.route("/", buildRoutinesRouter(runner));
 	app.route("/", buildHooksRouter(runner));
 	app.route("/", buildInboxRouter());

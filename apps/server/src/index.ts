@@ -104,6 +104,14 @@ async function main(): Promise<void> {
 				return router.fetch(new Request(trimmed.toString(), req));
 			}
 
+			// Pasted-image uploads. The uploads route returns URLs rooted at
+			// `/uploads/...` so they work for both browser <img src> and agent-
+			// written markdown. Stream the file straight off disk; reject path
+			// traversal the same way the SPA static handler does.
+			if (url.pathname.startsWith("/uploads/")) {
+				return serveUpload(req, config.uploadsRoot);
+			}
+
 			// Serve built web assets if a dist directory is available; otherwise
 			// fall back to the landing stub. Vite dev server proxies through us
 			// for /api and /ws, so its own routes never reach this branch.
@@ -257,6 +265,37 @@ async function serveStatic(req: Request, root: string): Promise<Response> {
 	const index = Bun.file(path.join(rootResolved, "index.html"));
 	if (await index.exists()) {
 		return new Response(index, { headers: { "content-type": "text/html; charset=utf-8" } });
+	}
+	return new Response("not found", { status: 404 });
+}
+
+/**
+ * Serve a file from the uploads root. URL prefix `/uploads/` strips before
+ * resolving, so `/uploads/2026/05/abc.png` maps to `<uploadsRoot>/2026/05/abc.png`.
+ * No SPA fallback — a 404 here means the URL is bad.
+ *
+ * Path-traversal protection mirrors `serveStatic`: any `..` in the relative
+ * path is rejected outright, and the resolved absolute path must remain
+ * inside `uploadsRoot`.
+ */
+async function serveUpload(req: Request, root: string): Promise<Response> {
+	const url = new URL(req.url);
+	const rel = decodeURIComponent(url.pathname.replace(/^\/+uploads\/+/, ""));
+	if (!rel || rel.includes("..")) return new Response("forbidden", { status: 403 });
+
+	const resolved = path.resolve(path.join(root, rel));
+	const rootResolved = path.resolve(root);
+	if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
+		return new Response("forbidden", { status: 403 });
+	}
+
+	const file = Bun.file(resolved);
+	if (await file.exists()) {
+		// Long-lived caching is safe because the on-disk filename is content-
+		// addressed (sha256 prefix). If the bytes change, the URL changes.
+		return new Response(file, {
+			headers: { "cache-control": "public, max-age=31536000, immutable" },
+		});
 	}
 	return new Response("not found", { status: 404 });
 }

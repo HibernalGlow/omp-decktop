@@ -14,6 +14,8 @@ export interface Config {
 	idleTimeoutMs: number;
 	/** Absolute path to the sqlite database file. */
 	dbPath: string;
+	/** Absolute path to the uploads root (images pasted into task bodies). */
+	uploadsRoot: string;
 	/**
 	 * Prompt to fire automatically on every NEW session once a WS subscriber
 	 * attaches. Empty string or null disables. Default: "/start" (expands to the
@@ -86,6 +88,19 @@ export function loadConfig(): Config {
 			process.env.OMP_DECK_DB_PATH?.trim() ||
 				process.env.OMP_DECK_DB?.trim() ||
 				path.join(process.cwd(), "data", "deck.db"),
+		),
+		uploadsRoot: path.resolve(
+			process.env.OMP_DECK_UPLOADS_ROOT?.trim() ||
+				path.join(
+					path.dirname(
+						path.resolve(
+							process.env.OMP_DECK_DB_PATH?.trim() ||
+								process.env.OMP_DECK_DB?.trim() ||
+								path.join(process.cwd(), "data", "deck.db"),
+						),
+					),
+					"uploads",
+				),
 		),
 		// Set OMP_DECK_AUTO_START="" or "0" to disable, or to any other prompt
 		// string to override the default "/start" slash-command invocation.
