@@ -24,6 +24,8 @@ import type {
 	ExtUiDialogResponse,
 	ModelInfo,
 	ModelRef,
+	PendingPlanApprovalWire,
+	PlanModeContextWire,
 	ServerFrame,
 	SessionSnapshot,
 	SessionSummary,
@@ -33,10 +35,12 @@ import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
 import { getEffectivePrelude } from "../orientation-store.ts";
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
+import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import type {
 	AgentBridge,
 	CreateSessionOpts,
 	EventListener,
+	PlanApprovalResponse,
 	ResumeSessionOpts,
 	RuntimeEnvUpdate,
 	SessionHandle,
@@ -66,6 +70,8 @@ interface Active {
 	subscribers: Set<string>;
 	/** Per-session bridge from SDK `ExtensionUIContext` calls to deck WS frames. */
 	uiBridge: ExtensionUIBridge;
+	/** Per-session bridge for the SDK plan-mode lifecycle. */
+	planBridge: PlanModeBridge;
 }
 
 export class InProcessAgentBridge implements AgentBridge {
@@ -393,14 +399,23 @@ export class InProcessAgentBridge implements AgentBridge {
 		// the deck UI via WebSocket frames.
 		setToolUIContext(uiBridge, true);
 
+		const planBridge = new PlanModeBridge({
+			sessionId,
+			session: session as unknown as import("./plan-mode-bridge.ts").PlanModeSessionSurface,
+			getArtifactsDir: () => (sessionManager as unknown as { getArtifactsDir: () => string | null }).getArtifactsDir(),
+			getSessionId: () => (sessionManager as unknown as { getSessionId: () => string | null }).getSessionId(),
+		});
+
 		const handle = new InProcessSessionHandle({
 			session,
 			sessionManager,
 			cwd,
 			sessionId,
 			getModelRegistry: () => this.ensureModelRegistry(),
+			planBridge,
 			onDispose: () => {
 				uiBridge.dispose();
+				planBridge.dispose();
 				this.active.delete(sessionId);
 				this.pendingAutoPrompts.delete(sessionId);
 			},
@@ -438,6 +453,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			turnInFlight: false,
 			subscribers: new Set(),
 			uiBridge,
+			planBridge,
 		});
 		return handle;
 	}
@@ -469,6 +485,43 @@ export class InProcessAgentBridge implements AgentBridge {
 		if (!entry) return;
 		entry.uiBridge.handleResponse(dialogId, response);
 	}
+
+	// ─── Plan-mode bridge surface ────────────────────────────────────────
+
+	subscribePlanModeFrames(
+		sessionId: string,
+		listener: (
+			frame: Extract<
+				ServerFrame,
+				{ type: "plan_mode_changed" | "plan_proposed" | "plan_proposal_resolved" }
+			>,
+		) => void,
+	): () => void {
+		const entry = this.active.get(sessionId);
+		if (!entry) return () => {};
+		// Replay current plan-mode state + any pending approval to the late
+		// subscriber so a reconnect mid-approval re-renders the card instead
+		// of waiting for the next event.
+		for (const frame of entry.planBridge.getReplayFrames()) {
+			try {
+				listener(frame);
+			} catch (err) {
+				log.warn(`pending plan-mode frame replay threw`, err);
+			}
+		}
+		return entry.planBridge.subscribeFrames(listener);
+	}
+
+	async respondToPlanApproval(
+		sessionId: string,
+		proposalId: string,
+		response: PlanApprovalResponse,
+	): Promise<"settled" | "unknown"> {
+		const entry = this.active.get(sessionId);
+		if (!entry) return "unknown";
+		this.bumpActivity(sessionId);
+		return entry.planBridge.respond(proposalId, response);
+	}
 }
 
 class InProcessSessionHandle implements SessionHandle {
@@ -477,6 +530,7 @@ class InProcessSessionHandle implements SessionHandle {
 	private session: AgentSession;
 	private readonly sessionManager: SessionManager;
 	private readonly modelRegistryRef: () => Promise<ModelRegistry>;
+	private readonly planBridge: PlanModeBridge;
 	private listeners = new Set<EventListener>();
 	private onDisposeCallback: () => void;
 	private disposed = false;
@@ -487,6 +541,7 @@ class InProcessSessionHandle implements SessionHandle {
 		cwd: string;
 		sessionId: string;
 		getModelRegistry: () => Promise<ModelRegistry>;
+		planBridge: PlanModeBridge;
 		onDispose: () => void;
 	}) {
 		this.session = args.session;
@@ -494,6 +549,7 @@ class InProcessSessionHandle implements SessionHandle {
 		this.cwd = args.cwd;
 		this.sessionId = args.sessionId;
 		this.modelRegistryRef = args.getModelRegistry;
+		this.planBridge = args.planBridge;
 		this.onDisposeCallback = args.onDispose;
 	}
 
@@ -536,6 +592,10 @@ class InProcessSessionHandle implements SessionHandle {
 			todoPhases: typeof s.getTodoPhases === "function" ? s.getTodoPhases() : [],
 		};
 		if (usage) snap.contextUsage = usage;
+		const planMode = this.planBridge.getPlanModeContext();
+		if (planMode) snap.planMode = planMode;
+		const pendingPlan = this.planBridge.getPendingPlanApproval();
+		if (pendingPlan) snap.pendingPlanApproval = pendingPlan;
 		return snap;
 	}
 
@@ -742,6 +802,31 @@ class InProcessSessionHandle implements SessionHandle {
 		if (accepted === false) {
 			throw new Error(`session rejected name (empty after sanitization?): ${JSON.stringify(name)}`);
 		}
+	}
+
+	// ─── Plan-mode bridge surface ────────────────────────────────────────
+
+	async setPlanMode(enabled: boolean): Promise<void> {
+		if (enabled) {
+			await this.planBridge.enter();
+		} else {
+			await this.planBridge.exit("user_cancelled");
+		}
+	}
+
+	getPlanModeContext(): PlanModeContextWire | undefined {
+		return this.planBridge.getPlanModeContext();
+	}
+
+	getPendingPlanApproval(): PendingPlanApprovalWire | undefined {
+		return this.planBridge.getPendingPlanApproval();
+	}
+
+	async respondToPlanApproval(
+		proposalId: string,
+		response: PlanApprovalResponse,
+	): Promise<"settled" | "unknown"> {
+		return this.planBridge.respond(proposalId, response);
 	}
 
 	async dispose(): Promise<void> {

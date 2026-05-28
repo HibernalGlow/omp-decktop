@@ -108,6 +108,14 @@ export class WsHub {
 				this.handleExtUiDialogResponse(ws, frame);
 				return;
 
+			case "set_plan_mode":
+				await this.handleSetPlanMode(ws, frame);
+				return;
+
+			case "plan_response":
+				await this.handlePlanResponse(ws, frame);
+				return;
+
 			default:
 				send(ws, { type: "error", error: `unknown frame type` });
 		}
@@ -168,6 +176,13 @@ export class WsHub {
 		const unsubUi = this.bridge.subscribeUiFrames(sessionId, (frame) => {
 			send(ws, frame);
 		});
+		// Mirror plan-mode lifecycle frames (mode-changed + proposed + resolved)
+		// into this connection. `subscribePlanModeFrames` replays the current
+		// plan-mode state + any pending approval card so a late tab re-renders
+		// the pill + approval UI immediately.
+		const unsubPlan = this.bridge.subscribePlanModeFrames(sessionId, (frame) => {
+			send(ws, frame);
+		});
 		const teardown = (): void => {
 			try {
 				unsubSession();
@@ -178,6 +193,11 @@ export class WsHub {
 				unsubUi();
 			} catch (err) {
 				log.warn(`ui unsubscribe threw`, err);
+			}
+			try {
+				unsubPlan();
+			} catch (err) {
+				log.warn(`plan-mode unsubscribe threw`, err);
 			}
 		};
 		ws.data.subscriptions.set(sessionId, teardown);
@@ -286,6 +306,64 @@ export class WsHub {
 				type: "error",
 				sessionId,
 				error: `ext_ui_dialog_response failed: ${String(err)}`,
+			});
+		}
+	}
+
+	private async handleSetPlanMode(
+		ws: ServerWebSocket<ConnectionData>,
+		frame: Extract<ClientFrame, { type: "set_plan_mode" }>,
+	): Promise<void> {
+		const handle = this.bridge.getSession(frame.sessionId);
+		if (!handle) {
+			send(ws, { type: "error", sessionId: frame.sessionId, error: "session not active" });
+			return;
+		}
+		this.bridge.bumpActivity(frame.sessionId);
+		try {
+			await handle.setPlanMode(frame.enabled);
+		} catch (err) {
+			log.warn(`setPlanMode threw`, err);
+			send(ws, {
+				type: "error",
+				sessionId: frame.sessionId,
+				error: `set_plan_mode failed: ${String((err as Error).message ?? err)}`,
+			});
+		}
+	}
+
+	private async handlePlanResponse(
+		ws: ServerWebSocket<ConnectionData>,
+		frame: Extract<ClientFrame, { type: "plan_response" }>,
+	): Promise<void> {
+		// Like ext_ui_dialog_response: any connection that observed the
+		// plan_proposed (replayed on subscribe) is allowed to answer. We
+		// bump activity to keep the reaper away while the user is mid-
+		// decision and during the renaming/synthetic-prompt phase.
+		this.bridge.bumpActivity(frame.sessionId);
+		const { approved, finalPath, editedContent, proposalId, sessionId } = frame;
+		try {
+			const outcome = await this.bridge.respondToPlanApproval(sessionId, proposalId, {
+				approved,
+				...(finalPath !== undefined ? { finalPath } : {}),
+				...(editedContent !== undefined ? { editedContent } : {}),
+			});
+			if (outcome === "unknown") {
+				// 409-equivalent: stale/double-click. The client rolls back its
+				// optimistic UI. The bridge already broadcasts the canonical
+				// `plan_proposal_resolved` from whichever side won the race.
+				send(ws, {
+					type: "error",
+					sessionId,
+					error: `plan_response: proposal ${proposalId} already resolved or unknown`,
+				});
+			}
+		} catch (err) {
+			log.warn(`respondToPlanApproval threw`, err);
+			send(ws, {
+				type: "error",
+				sessionId,
+				error: `plan_response failed: ${String((err as Error).message ?? err)}`,
 			});
 		}
 	}

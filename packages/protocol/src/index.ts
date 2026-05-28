@@ -622,6 +622,35 @@ export interface ContextUsage {
 	percent: number | null;
 }
 
+/**
+ * Live plan-mode state for a session. Mirrors the SDK's `PlanModeState` shape
+ * minus internal flags the deck UI never consumes (workflow / reentry).
+ * Absent on a snapshot means plan mode is off.
+ */
+export interface PlanModeContextWire {
+	enabled: boolean;
+	/** Always `local://PLAN.md` for the deck MVP — surfaced so future per-session overrides land here. */
+	planFilePath: string;
+}
+
+/**
+ * A plan the agent has proposed for approval. The deck UI renders this as an
+ * inline `PlanApproval` card. Replayed on `subscribed` so a page-reload during
+ * pending approval re-shows the card without waiting for the next event.
+ */
+export interface PendingPlanApprovalWire {
+	/** Stable id used to disambiguate concurrent approval responses (two tabs). */
+	proposalId: string;
+	/** Original `local://` path the agent wrote the plan to (always `local://PLAN.md` for MVP). */
+	planFilePath: string;
+	/** Verbatim contents of `planFilePath` as the agent submitted it. */
+	planContent: string;
+	/** Title derived via SDK `resolvePlanTitle` — pre-fills the title input. */
+	suggestedTitle: string;
+	/** Final `local://` path the plan will move to on approve (title-stem.md). */
+	suggestedFinalPath: string;
+}
+
 /** Snapshot delivered when a client subscribes to an existing session. */
 export interface SessionSnapshot {
 	sessionId: string;
@@ -641,6 +670,18 @@ export interface SessionSnapshot {
 	 * `null` in the same case.
 	 */
 	contextUsage?: ContextUsage;
+	/**
+	 * Plan-mode state, present iff the session is in plan mode at snapshot
+	 * time. The web client uses this to render the "Plan" pill and gate the
+	 * Shift+Tab toggle's visual on/off without a separate state fetch.
+	 */
+	planMode?: PlanModeContextWire;
+	/**
+	 * Unresolved plan-approval card, if the agent proposed a plan that the
+	 * user hasn't approved/rejected yet. Replayed verbatim on subscribe so a
+	 * page reload re-renders the PlanApproval inline component.
+	 */
+	pendingPlanApproval?: PendingPlanApprovalWire;
 }
 
 /**
@@ -697,7 +738,29 @@ export type ClientFrame =
 			type: "ext_ui_dialog_response";
 			sessionId: string;
 			dialogId: string;
-	  } & ExtUiDialogResponse);
+	  } & ExtUiDialogResponse)
+	/**
+	 * Enter or exit plan mode for `sessionId`. Idempotent: re-sending the
+	 * same `enabled` value is a no-op. Server snapshots active tools on
+	 * enter and restores them on exit, registers/clears the standing
+	 * resolve handler, and broadcasts a `plan_mode_changed` frame.
+	 */
+	| { type: "set_plan_mode"; sessionId: string; enabled: boolean }
+	/**
+	 * Reply to a `plan_proposed` frame. `approved=true` triggers rename +
+	 * synthetic `planModeApprovedPrompt` injection; `approved=false`
+	 * silently exits plan mode. `editedContent` overwrites `local://PLAN.md`
+	 * before the rename; `finalPath` overrides the title-derived destination
+	 * (must be `local://*.md`).
+	 */
+	| {
+			type: "plan_response";
+			sessionId: string;
+			proposalId: string;
+			approved: boolean;
+			finalPath?: string;
+			editedContent?: string;
+	  };
 
 /** Server → Client. */
 export type ServerFrame =
@@ -821,6 +884,46 @@ export type ServerFrame =
 			sessionId: string;
 			dialogId: string;
 			reason: "session_disposed" | "timeout" | "aborted";
+	  }
+	/**
+	 * Plan mode toggled for `sessionId`. Broadcast on every enter/exit
+	 * (whether user-initiated via `set_plan_mode` or server-initiated as
+	 * part of approving / rejecting a proposal). Clients reconcile their
+	 * composer-pill + status-pill state by mirroring this onto the session.
+	 */
+	| {
+			type: "plan_mode_changed";
+			sessionId: string;
+			enabled: boolean;
+			/** Always present when `enabled` — absent on exit. */
+			planFilePath?: string;
+	  }
+	/**
+	 * Agent has finalized a plan and called `resolve apply`. The web client
+	 * renders an inline `PlanApproval` card with Approve / Reject / Edit &
+	 * approve buttons and replies with `plan_response`. Replayed verbatim
+	 * on `subscribed` via `pendingPlanApproval` so a late tab sees the card.
+	 */
+	| {
+			type: "plan_proposed";
+			sessionId: string;
+			proposalId: string;
+			planFilePath: string;
+			planContent: string;
+			suggestedTitle: string;
+			suggestedFinalPath: string;
+	  }
+	/**
+	 * A previously-broadcast `plan_proposed` has been resolved. Second-tab
+	 * Approve clicks observe `outcome="resolved_elsewhere"` on the same id
+	 * and can roll back their optimistic UI. `expired` is reserved for a
+	 * future server-side timeout; v1 emits only `approved`/`rejected`.
+	 */
+	| {
+			type: "plan_proposal_resolved";
+			sessionId: string;
+			proposalId: string;
+			outcome: "approved" | "rejected" | "resolved_elsewhere" | "expired";
 	  }
 	/**
 	 * Server liveness heartbeat. Broadcast on a fixed interval (default 5s).

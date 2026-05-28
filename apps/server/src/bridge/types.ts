@@ -6,6 +6,8 @@ import type {
 	ImageAttachment,
 	ModelInfo,
 	ModelRef,
+	PendingPlanApprovalWire,
+	PlanModeContextWire,
 	ServerFrame,
 	SessionSnapshot,
 	SessionSummary,
@@ -43,6 +45,33 @@ export interface AgentBridge {
 	): () => void;
 	/** Settle a previously-emitted dialog with the client's response. */
 	respondToUiDialog(sessionId: string, dialogId: string, response: ExtUiDialogResponse): void;
+	/**
+	 * Subscribe to plan-mode frames for `sessionId` (mode-changed + proposed +
+	 * resolved). Returns an unsubscribe function. Implementations MAY replay
+	 * the current `plan_mode_changed` and any pending `plan_proposed` to a
+	 * late subscriber so a page-reload during plan mode re-renders the pill
+	 * and the approval card immediately.
+	 */
+	subscribePlanModeFrames(
+		sessionId: string,
+		listener: (
+			frame: Extract<
+				ServerFrame,
+				{ type: "plan_mode_changed" | "plan_proposed" | "plan_proposal_resolved" }
+			>,
+		) => void,
+	): () => void;
+	/**
+	 * Settle a previously-emitted plan-approval proposal with the client's
+	 * response. Returns `"settled"` on success, `"unknown"` when the
+	 * proposalId is unknown or already resolved (caller surfaces a 409 to
+	 * the client so optimistic UI can roll back).
+	 */
+	respondToPlanApproval(
+		sessionId: string,
+		proposalId: string,
+		response: PlanApprovalResponse,
+	): Promise<"settled" | "unknown">;
 	dispose(): Promise<void>;
 }
 
@@ -113,6 +142,21 @@ export interface SessionHandle {
 	 */
 	getContextUsage(): ContextUsage | undefined;
 	dispose(): Promise<void>;
+	/** Idempotent enter/exit. No-op when state already matches. */
+	setPlanMode(enabled: boolean): Promise<void>;
+	/** Read the bridge's plan-mode context for snapshot replay. */
+	getPlanModeContext(): PlanModeContextWire | undefined;
+	/** Read the unresolved plan-approval card for snapshot replay. */
+	getPendingPlanApproval(): PendingPlanApprovalWire | undefined;
+	/**
+	 * Settle a plan-approval proposal. Returns `"settled"` on success,
+	 * `"unknown"` when the proposalId does not match the pending entry
+	 * (already resolved by a sibling tab; second clicker gets a 409).
+	 */
+	respondToPlanApproval(
+		proposalId: string,
+		response: PlanApprovalResponse,
+	): Promise<"settled" | "unknown">;
 }
 
 export type SlashDispatchResult =
@@ -121,3 +165,15 @@ export type SlashDispatchResult =
 	| { kind: "rewritten"; output: string; prompt: string };
 
 export interface AgentMessagePassthrough extends AgentMessageJson {}
+/**
+ * Decision the user made on a `plan_proposed` card. `approved=false` is the
+ * reject path (no rename, no synthetic prompt — just exit plan mode); the
+ * other fields apply only when approving.
+ */
+export interface PlanApprovalResponse {
+	approved: boolean;
+	/** Optional rename: `local://*.md`. When absent, uses the suggested final path. */
+	finalPath?: string;
+	/** Optional edited plan body. When present, overwrites `local://PLAN.md` before the rename. */
+	editedContent?: string;
+}
