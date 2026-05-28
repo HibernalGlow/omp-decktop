@@ -5,6 +5,10 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
+### Added
+
+- **Plan mode in deck (TUI parity)** — T-105. Shift+Tab in the composer (or `/plan [on|off]` from the slash picker) toggles plan mode for the active session. While active, the agent gets the SDK's plan-mode system prompt + the `resolve` tool added to its active tool set; writes go through the `#enforcePlanModeToolDecision` intercept. When the agent calls `resolve apply` after writing `local://PLAN.md`, the deck surfaces a `PlanApproval` inline card in the chat with Reject / Approve / Edit & approve. Approve renames the plan to `local://<title>.md` and queues a synthetic execute prompt that runs in a new turn with the full tool set restored. Reject exits plan mode cleanly. State indicators: header pill, composer border tint (`accent-plan`), sidebar badge on the active session row. Lifts the T-83 `ext_ui_dialog` bridge pattern; ~620 lines across protocol, server bridge (15 unit tests covering enter/idempotent-enter/exit/approve/edit-and-approve/reject/CAS/cancel/dispose/path-traversal-rejection/snapshot-replay), web reducer + store actions, three components. Design doc: `kb://projects/omp-deck/plan-mode-design.md`.
+
 ### Fixed
 
 - Fresh-clone `bun run dev` no longer fails on missing `TELEGRAM_BOT_TOKEN`. The root `dev` script was fanning out across every workspace (`--filter='@omp-deck/*'`) and bringing the standalone telegram bridge along with the deck server + web — the bridge's config validator throws if no bot token is set, so first-run users would hit an error before the UI ever came up. The bridge has always been opt-in (Settings → Messaging → Start, or `bun run dev:telegram`); the dev script now restricts itself to `@omp-deck/server` + `@omp-deck/web` to match the documented behavior in `CONTRIBUTING.md`.
