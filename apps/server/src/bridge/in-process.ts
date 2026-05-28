@@ -31,6 +31,7 @@ import type {
 
 import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
+import { getEffectivePrelude } from "../orientation-store.ts";
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import type {
 	AgentBridge,
@@ -44,54 +45,14 @@ import type {
 
 const log = logger("bridge:in-process");
 
+
 /**
  * System-prompt block prepended to every omp session created or resumed via
- * this bridge. Tells the agent omp-deck exists, where to find its REST API,
- * and how the kanban / cron / inbox surfaces are shaped — so it can read and
- * mutate them via `bash` + `curl` without needing the user to re-explain.
+ * this bridge. The canonical text lives in `orientation-store.ts` so the deck
+ * Settings UI can read + override it without touching server source. The
+ * helper reads through to a deck-managed file on disk (`<dataDir>/prelude.md`)
+ * and falls back to the bundled default when no override exists.
  */
-const OMP_DECK_CONTEXT = `# omp-deck context
-
-You are running inside an omp-deck session. omp-deck is a local web UI for
-the omp coding agent that also exposes a kanban, cron scheduler, and inbox
-over HTTP on the loopback interface.
-
-Local API base: http://127.0.0.1:8787/api  (use the \`bash\` tool with \`curl\`).
-
-## Tasks (kanban)
-- GET    /api/tasks                 → { tasks, states }
-- POST   /api/tasks                 { title, body?, stateId?, cwd? }
-- PATCH  /api/tasks/:id             { title?, body?, stateId?, cwd?, archived? }
-- DELETE /api/tasks/:id
-- POST   /api/tasks/:id/move        { stateId, index }
-- GET/POST/PATCH/DELETE /api/task-states  (kanban columns; user-configurable)
-- States are user-defined; default seed is backlog / active / blocked / done.
-  Always fetch /api/task-states before assuming column ids.
-
-## Routines (cron scheduler)
-- GET    /api/routines              → { routines }
-- POST   /api/routines              { name, cron, actionKind, actionBody, actionCwd?, enabled? }
-- PATCH  /api/routines/:id          { …same fields, all optional }
-- DELETE /api/routines/:id
-- POST   /api/routines/:id/run      → fire now (out of schedule)
-- GET    /api/routines/:id/runs?limit=N
-- actionKind ∈ { "bash", "script", "prompt" }. \`prompt\` runs \`omp -p\` headless.
-
-## Inbox
-- GET    /api/inbox?kind=&includeProcessed=
-- POST   /api/inbox                 { kind, title, body?, source? }
-- PATCH  /api/inbox/:id             { kind?, title?, body?, source?, processed? }
-- DELETE /api/inbox/:id
-- kind ∈ { email, ticket, idea, decision, investigation, capture }
-
-## Conventions
-- All timestamps ISO-8601 UTC.
-- IDs are app-generated strings; do not synthesize them.
-- When the user asks about "tasks", "routines", or "inbox" without qualifier,
-  they mean these REST surfaces — not files on disk.
-- Before mutating, GET the current state. After mutating, briefly confirm.
-`;
-
 
 interface Active {
 	handle: InProcessSessionHandle;
@@ -142,7 +103,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			// Skip eval-tool Python warmup on session create. On Windows this otherwise
 			// flashes a python.exe console window each turn-zero; on demand spawn is fine.
 			skipPythonPreflight: true,
-			systemPrompt: (defaults) => [OMP_DECK_CONTEXT, ...defaults],
+			systemPrompt: (defaults) => [getEffectivePrelude(), ...defaults],
 			// Tell the SDK this session has a UI — gates the `ask` tool registration
 			// and any extension that calls `ctx.ui.*`. The actual ExtensionUIContext
 			// is installed via `setToolUIContext(...)` below.
@@ -185,7 +146,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			modelRegistry,
 			authStorage: modelRegistry.authStorage,
 			skipPythonPreflight: true,
-			systemPrompt: (defaults) => [OMP_DECK_CONTEXT, ...defaults],
+			systemPrompt: (defaults) => [getEffectivePrelude(), ...defaults],
 			hasUI: true,
 		});
 		const session = result.session;
@@ -706,13 +667,61 @@ class InProcessSessionHandle implements SessionHandle {
 		text: string,
 		opts?: { streamingBehavior?: "steer" | "followUp"; images?: import("@omp-deck/protocol").ImageAttachment[] },
 	): Promise<void> {
+		// Snapshot the streaming flag BEFORE calling the SDK so we can tell
+		// whether the SDK queued this prompt (was streaming) or ran it immediately.
+		// The deck UI uses this to surface a "queued" bubble — without it, prompts
+		// sent during streaming look like they vanished until the current turn ends.
+		const wasStreaming = this.isStreamingNow();
 		const promptOpts: Record<string, unknown> = {};
 		if (opts?.streamingBehavior) promptOpts.streamingBehavior = opts.streamingBehavior;
 		if (opts?.images && opts.images.length > 0) promptOpts.images = opts.images;
 		await this.session.prompt(text, Object.keys(promptOpts).length > 0 ? (promptOpts as any) : undefined);
+		if (wasStreaming) {
+			const behavior = (opts?.streamingBehavior ?? "followUp") as "steer" | "followUp";
+			this.emit({
+				type: "prompt_queued",
+				queuedId: crypto.randomUUID(),
+				text,
+				images: opts?.images,
+				behavior,
+				queueLength: this.queuedMessageCount(),
+			} as unknown as AgentSessionEventJson);
+		}
+	}
+
+	isStreamingNow(): boolean {
+		const s = this.session as unknown as { isStreaming?: boolean };
+		return Boolean(s.isStreaming);
+	}
+
+	queuedMessageCount(): number {
+		const s = this.session as unknown as { queuedMessageCount?: number };
+		return typeof s.queuedMessageCount === "number" ? s.queuedMessageCount : 0;
+	}
+
+	clearQueue(): { steering: number; followUp: number } {
+		const s = this.session as unknown as {
+			clearQueue?: () => { steering: string[]; followUp: string[] };
+		};
+		if (typeof s.clearQueue !== "function") return { steering: 0, followUp: 0 };
+		const dropped = s.clearQueue();
+		const counts = { steering: dropped.steering.length, followUp: dropped.followUp.length };
+		if (counts.steering + counts.followUp > 0) {
+			this.emit({
+				type: "queue_cleared",
+				cleared: counts,
+			} as unknown as AgentSessionEventJson);
+		}
+		return counts;
 	}
 
 	async abort(): Promise<void> {
+		// The SDK's `abort()` cancels the in-flight turn but leaves the followUp
+		// queue intact, which surprises users — they pressed Stop expecting
+		// "stop everything". Mirror the user intent: drop the queue first, then
+		// abort. The clearQueue() emits its own `queue_cleared` event so the
+		// deck UI reconciles its `queuedPrompts` list.
+		this.clearQueue();
 		await this.session.abort();
 	}
 

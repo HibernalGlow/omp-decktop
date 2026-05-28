@@ -43,6 +43,21 @@ async function main(): Promise<void> {
 		devMode: config.devMode,
 	});
 
+	// Tell the maintenance-gate extension (~/.omp/agent/extensions/maintenance-gate)
+	// that every session this server spawns IS a deck-managed org root, regardless
+	// of session cwd. Without this, the extension stays inactive in deck sessions
+	// because cwd rarely has the flat-file org markers (inbox/, tasks/, knowledge/)
+	// that the upstream detector looks for. Routine agent subprocesses inherit
+	// this env via Bun.spawn defaults, so a single set here covers both surfaces.
+	//
+	// Honors OMP_DECK_MAINTENANCE_GATE_DISABLED (set via Settings → Orientation):
+	// when truthy we don't set the org root, so even an unaltered installed copy
+	// of the extension stays inactive. The extension itself also checks the flag.
+	const gateDisabledRaw = (process.env.OMP_DECK_MAINTENANCE_GATE_DISABLED ?? "").trim().toLowerCase();
+	const gateDisabled = ["1", "true", "yes", "on"].includes(gateDisabledRaw);
+	if (!process.env.OMP_DECK_ORG_ROOT && !gateDisabled) {
+		process.env.OMP_DECK_ORG_ROOT = resolveKbRoot();
+	}
 	openDb({ path: config.dbPath });
 
 	// Initialize the SDK's global `theme` so tools that reference symbols

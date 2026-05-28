@@ -121,6 +121,80 @@ export interface RestartServerResponse {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Orientation (deck-managed session-shaping artifacts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Source-of-truth for the system-prompt prelude prepended to every session. */
+export interface PreludeResponse {
+	/** Absolute path of the deck-managed override file. */
+	path: string;
+	/** Bundled default text the deck falls back to when no override is set. */
+	default: string;
+	/** Current override text, or null when no override exists. */
+	override: string | null;
+	/** What the bridge actually injects on the next `createAgentSession`. */
+	effective: string;
+}
+
+export interface UpdatePreludeRequest {
+	/** `null` clears the override so future sessions fall back to `default`. */
+	value: string | null;
+}
+
+/** The `~/.omp/agent/commands/start.md` orchestrator fired on session boot. */
+export interface StartCommand {
+	path: string;
+	exists: boolean;
+	/** `description:` frontmatter value, empty string when absent. */
+	description: string;
+	/** Markdown body sans frontmatter. */
+	body: string;
+}
+
+export interface UpdateStartCommandRequest {
+	description: string;
+	body: string;
+}
+
+export type GateValueSource = "process-env" | "env-file" | "default" | "unset";
+
+/** One tunable knob for the maintenance-gate extension. */
+export interface GateKnob {
+	/** Effective integer value the extension would observe right now. */
+	value: number;
+	/** Bundled default when no override is set. */
+	default: number;
+	/** Raw string from env-file / process-env, or null when unset. */
+	rawValue: string | null;
+	source: GateValueSource;
+}
+
+/** Live state of the maintenance-gate extension as the deck sees it. */
+export interface MaintenanceGateState {
+	/** Inverse of `OMP_DECK_MAINTENANCE_GATE_DISABLED`. */
+	enabled: boolean;
+	disabledRaw: string | null;
+	disabledSource: GateValueSource;
+	knobs: {
+		minOpMsgs: GateKnob;
+		minReleaseAgeMs: GateKnob;
+		fireFloorMs: GateKnob;
+	};
+	orgRoot: string | null;
+	orgRootSource: GateValueSource;
+	installedExtensionPresent: boolean;
+	installedExtensionPath: string;
+	preview: { deckMode: string; flatFileMode: string };
+}
+
+export interface UpdateMaintenanceGateRequest {
+	enabled?: boolean;
+	minOpMsgs?: number | null;
+	minReleaseAgeMs?: number | null;
+	fireFloorMs?: number | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Bridge supervisor (long-running auxiliary processes the deck owns)
 // ─────────────────────────────────────────────────────────────────────────────
 

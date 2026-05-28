@@ -190,6 +190,52 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		hotApply: false,
 		description: "Provider API key used by the omp SDK. Replace only; never revealed in list responses.",
 	})),
+	{
+		key: "OMP_DECK_MAINTENANCE_GATE_DISABLED",
+		valueType: "boolean",
+		sensitive: false,
+		restartRequired: false,
+		hotApply: true,
+		description:
+			"Disable the maintenance-gate extension for new sessions when truthy. Honored by the deck (skips setting OMP_DECK_ORG_ROOT) and by the installed extension itself when present.",
+	},
+	{
+		key: "OMP_MAINTENANCE_GATE_MIN_OP_MSGS",
+		defaultValue: "4",
+		valueType: "int",
+		sensitive: false,
+		restartRequired: false,
+		hotApply: true,
+		description:
+			"Floor: operator messages since the last release event before the gate may fire again.",
+	},
+	{
+		key: "OMP_MAINTENANCE_GATE_MIN_RELEASE_AGE_MS",
+		defaultValue: "480000",
+		valueType: "int",
+		sensitive: false,
+		restartRequired: false,
+		hotApply: true,
+		description: "Floor: wall-clock ms since the last release event before the gate may fire again.",
+	},
+	{
+		key: "OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS",
+		defaultValue: "1500000",
+		valueType: "int",
+		sensitive: false,
+		restartRequired: false,
+		hotApply: true,
+		description: "Floor: wall-clock ms between consecutive fires (cross-session via disk state).",
+	},
+	{
+		key: "OMP_DECK_ORG_ROOT",
+		valueType: "path",
+		sensitive: false,
+		restartRequired: false,
+		hotApply: true,
+		description:
+			"Deck-session org root the maintenance-gate uses to anchor captures. Set automatically by the server to ~/kb unless overridden or disabled.",
+	},
 ];
 
 export const ENV_SCHEMA_BY_KEY = new Map(ENV_SCHEMA.map((entry) => [entry.key, entry]));

@@ -37,12 +37,22 @@
  *   produces dramatically calmer behavior in long agentic sessions while
  *   still firing at meaningful "yield" points.
  *
- * Tuning knobs are env-overridable:
+ * Tuning knobs are env-overridable AND read on every evaluation, so the deck
+ * Settings → Orientation panel can change them live without restarting any
+ * agent session:
  *
  *   OMP_MAINTENANCE_GATE_MIN_OP_MSGS         (default 4)
  *   OMP_MAINTENANCE_GATE_MIN_RELEASE_AGE_MS  (default 8 * 60_000)
  *   OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS       (default 25 * 60_000)
  *   OMP_MAINTENANCE_GATE_ROOTS               (CSV of explicit org roots)
+ *   OMP_DECK_ORG_ROOT                        (deck-session org root; set by
+ *                                             the deck server before spawning
+ *                                             sessions so the gate activates
+ *                                             regardless of session cwd)
+ *   OMP_DECK_MAINTENANCE_GATE_DISABLED       (truthy => gate stays silent;
+ *                                             checked at session_start AND
+ *                                             every turn_end so a mid-session
+ *                                             toggle takes effect immediately)
  *
  * Installed by omp-deck's StarterExtensionsInstaller into
  * `~/.omp/agent/extensions/maintenance-gate/`. Idempotent — never
@@ -61,27 +71,43 @@ const NO_MAINT_PHRASE = "No maintenance needed";
 // detecting "have we already fired in this segment".
 const FIRE_MARKER = "## Maintenance check";
 
-// Tuning floors — env-overridable for fast iteration without redeploy.
-const MIN_OP_MSGS_SINCE_RELEASE = envInt("OMP_MAINTENANCE_GATE_MIN_OP_MSGS", 4);
-const MIN_TIME_SINCE_RELEASE_MS = envInt(
-	"OMP_MAINTENANCE_GATE_MIN_RELEASE_AGE_MS",
-	8 * 60 * 1000,
-);
-const MIN_TIME_BETWEEN_FIRES_MS = envInt(
-	"OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS",
-	25 * 60 * 1000,
-);
+// Tuning floors are read per-fire, not at module init, so the deck Settings
+// → Orientation panel can hot-apply changes without requiring the user to
+// reload every session. The `OMP_DECK_MAINTENANCE_GATE_DISABLED` flag bails
+// the gate at activation time and again on every turn_end as a safety net.
+function getMinOpMsgsSinceRelease(): number {
+	return envInt("OMP_MAINTENANCE_GATE_MIN_OP_MSGS", 4);
+}
+function getMinTimeSinceReleaseMs(): number {
+	return envInt("OMP_MAINTENANCE_GATE_MIN_RELEASE_AGE_MS", 8 * 60 * 1000);
+}
+function getMinTimeBetweenFiresMs(): number {
+	return envInt("OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS", 25 * 60 * 1000);
+}
+function isGateDisabled(): boolean {
+	const raw = (process.env.OMP_DECK_MAINTENANCE_GATE_DISABLED ?? "").trim().toLowerCase();
+	return ["1", "true", "yes", "on"].includes(raw);
+}
 
 // Capture path detection. First-folder segment match against the canonical
-// OMP folders. Anchored on start-of-string OR a separator so relative paths
-// like `tasks/foo.md` match the same as `C:/.../tasks/foo.md`.
+// OMP folders, plus `kb` for deck-managed wiki writes. Anchored on
+// start-of-string OR a separator so relative paths like `tasks/foo.md`
+// match the same as `C:/.../tasks/foo.md`.
 const CAPTURE_PATH_RE =
-	/(?:^|[\/\\])(inbox|tasks|knowledge|queries|context|reminders)[\/\\]/i;
+	/(?:^|[\/\\])(inbox|tasks|knowledge|queries|context|reminders|kb)[\/\\]/i;
 
 // Skill creation also counts as maintenance. User-level
 // (~/.omp/agent/skills) and project-level (<cwd>/.omp/skills) both match.
 const SKILL_PATH_RE =
 	/[\/\\]\.omp[\/\\](?:agent[\/\\])?skills[\/\\][^\/\\]+[\/\\]SKILL\.md$/i;
+
+// Deck-style captures via REST. The agent invokes these as bash curl calls
+// or eval/fetch calls — POST /api/inbox, POST/PATCH /api/tasks, POST/PUT
+// /api/kb/file. Two independent assertions because curl puts the verb BEFORE
+// the path (`curl -X POST .../api/inbox`) while fetch puts it AFTER
+// (`fetch('.../api/inbox', { method: 'POST', ... })`).
+const DECK_CAPTURE_PATH_RE = /\/api\/(?:inbox|tasks|kb\/file)\b/i;
+const DECK_CAPTURE_VERB_RE = /\b(POST|PUT|PATCH)\b/i;
 
 type Profile = "active" | "inactive";
 
@@ -121,6 +147,17 @@ function envInt(name: string, def: number): number {
  * overrides the structural sniff.
  */
 function detectOrgRoot(cwd: string): string | null {
+	// Hard kill switch from the deck Settings → Orientation panel. Bails the
+	// gate regardless of which other signal (deck root, explicit roots,
+	// structural sniff) would otherwise activate it.
+	if (isGateDisabled()) return null;
+
+	// Highest priority: deck-session marker. The deck server sets this for
+	// every session it spawns so the gate activates regardless of cwd, which
+	// for deck sessions rarely matches the flat-file org structure below.
+	const deckRoot = process.env.OMP_DECK_ORG_ROOT?.trim();
+	if (deckRoot && deckRoot.length > 0) return deckRoot;
+
 	const explicit = (process.env.OMP_MAINTENANCE_GATE_ROOTS ?? "")
 		.split(",")
 		.map((s) => s.trim())
@@ -174,24 +211,50 @@ function writeGateState(orgDir: string, state: GateDiskState): void {
 }
 
 function buildReminder(): string {
+	const deckMode = !!process.env.OMP_DECK_ORG_ROOT?.trim();
+
+	// In deck-managed sessions, kanban + inbox live behind the REST API; file
+	// paths like `inbox/captures/foo.md` resolve nowhere useful. Flat-file
+	// orgs keep the original on-disk paths. Both modes route insights and
+	// skills to files because no REST surface owns them.
+	const rows: [string, string][] = deckMode
+		? [
+				["Reusable insight or pattern", "→ `kb://system/<topic>.md`"],
+				["Project status changed", "→ `POST /api/inbox` with `kind: \"capture\"` describing the change; daily briefing reconciles into `kb://system/projects-hub.md`"],
+				["New task identified", "→ `POST /api/tasks`"],
+				["Question worth preserving", "→ `POST /api/inbox` with `kind: \"capture\"` (or `kind: \"investigation\"` if you intend to follow up)"],
+				["Feature idea / future project", "→ `POST /api/inbox` with `kind: \"idea\"`"],
+				["Decision needed", "→ `POST /api/inbox` with `kind: \"decision\"`"],
+				["Bug to investigate", "→ `POST /api/inbox` with `kind: \"investigation\"`"],
+				["Quick unsorted capture", "→ `POST /api/inbox` with `kind: \"capture\"`"],
+				["New capability learned", "→ create a skill at `.omp/skills/<name>/SKILL.md` (project) or `~/.omp/agent/skills/<name>/SKILL.md` (user)"],
+			]
+		: [
+				["Reusable insight or pattern", "→ `knowledge/<subfolder>/<topic>.md`"],
+				["Project status changed", "→ update `context/current-state.md`"],
+				["New task identified", "→ `tasks/<name>.md`"],
+				["Question worth preserving", "→ `queries/<question>.md`"],
+				["Feature idea / future project", "→ `inbox/ideas/<item>.md`"],
+				["Decision needed", "→ `inbox/decisions/<item>.md`"],
+				["Bug to investigate", "→ `inbox/investigations/<item>.md`"],
+				["Quick unsorted capture", "→ `inbox/captures/<item>.md`"],
+				["New capability learned", "→ create a skill at `.omp/skills/<name>/SKILL.md` (project) or `~/.omp/agent/skills/<name>/SKILL.md` (user)"],
+			];
+
+	const releaseClause = deckMode
+		? "invoking any of the REST endpoints below (or writing to one of the listed paths)"
+		: "writing to any of the paths below";
+
 	return [
 		"---",
 		"",
 		FIRE_MARKER,
 		"",
-		`Did this segment of work produce any of the signals below? Capture **now** — writing to any of the paths releases this check automatically. If nothing applies, state the literal phrase "${NO_MAINT_PHRASE}" to release.`,
+		`Did this segment of work produce any of the signals below? Capture **now** — ${releaseClause} releases this check automatically. If nothing applies, state the literal phrase "${NO_MAINT_PHRASE}" to release.`,
 		"",
 		"| Signal | Action if present |",
 		"|--------|-------------------|",
-		"| Reusable insight or pattern | → `knowledge/<subfolder>/<topic>.md` |",
-		"| Project status changed | → update `context/current-state.md` |",
-		"| New task identified | → `tasks/<name>.md` |",
-		"| Question worth preserving | → `queries/<question>.md` |",
-		"| Feature idea / future project | → `inbox/ideas/<item>.md` |",
-		"| Decision needed | → `inbox/decisions/<item>.md` |",
-		"| Bug to investigate | → `inbox/investigations/<item>.md` |",
-		"| Quick unsorted capture | → `inbox/captures/<item>.md` |",
-		"| New capability learned | → create a skill at `.omp/skills/<name>/SKILL.md` (project) or `~/.omp/agent/skills/<name>/SKILL.md` (user) |",
+		...rows.map(([signal, action]) => `| ${signal} | ${action} |`),
 		"",
 		"Be aggressive about capture — lost insights are unrecoverable.",
 		"",
@@ -290,6 +353,20 @@ function looksLikeCapture(target: string): boolean {
 	return CAPTURE_PATH_RE.test(target) || SKILL_PATH_RE.test(target);
 }
 
+function bashCommandFromInput(input: unknown): string {
+	if (!input || typeof input !== "object") return "";
+	const obj = input as Record<string, unknown>;
+	const candidates = [obj.command, obj.cmd, obj.script, obj.code];
+	for (const c of candidates) {
+		if (typeof c === "string") return c;
+	}
+	return "";
+}
+
+function looksLikeDeckCapture(command: string): boolean {
+	return DECK_CAPTURE_PATH_RE.test(command) && DECK_CAPTURE_VERB_RE.test(command);
+}
+
 // ─── extension entry ───────────────────────────────────────────────────────
 
 export default function maintenanceGate(pi: ExtensionAPI): void {
@@ -326,10 +403,22 @@ export default function maintenanceGate(pi: ExtensionAPI): void {
 	pi.on("tool_call", async (event, ctx) => {
 		if (profile === "inactive" || !orgDir) return;
 		const tn = normalizeToolName(event.toolName);
-		if (tn !== "write" && tn !== "edit") return;
-		const target = pathFromToolInput(event.input);
-		if (target && looksLikeCapture(target)) {
-			advanceReleaseCursor(ctx.sessionManager.getBranch());
+		// File-write captures (flat-file orgs + kb writes).
+		if (tn === "write" || tn === "edit") {
+			const target = pathFromToolInput(event.input);
+			if (target && looksLikeCapture(target)) {
+				advanceReleaseCursor(ctx.sessionManager.getBranch());
+			}
+			return;
+		}
+		// Deck REST captures (POST/PATCH /api/inbox|tasks, POST/PUT /api/kb/file)
+		// invoked via bash curl or eval fetch. Both tools expose the executed
+		// string under `command`/`code`.
+		if (tn === "bash" || tn === "eval") {
+			const cmd = bashCommandFromInput(event.input);
+			if (cmd && looksLikeDeckCapture(cmd)) {
+				advanceReleaseCursor(ctx.sessionManager.getBranch());
+			}
 		}
 	});
 
@@ -344,6 +433,10 @@ export default function maintenanceGate(pi: ExtensionAPI): void {
 
 	pi.on("turn_end", async (_event, ctx) => {
 		if (profile === "inactive" || !orgDir) return;
+		// Live kill switch: a mid-session disable (Settings → Orientation)
+		// short-circuits before any further evaluation. Cheap; runs at most
+		// once per turn boundary.
+		if (isGateDisabled()) return;
 
 		// Re-entry guard: the turn_end immediately after we synthesize is
 		// ours; skip it without touching any cursors.
@@ -357,7 +450,7 @@ export default function maintenanceGate(pi: ExtensionAPI): void {
 
 		// FLOOR 1 — cross-session wall-clock minimum between fires.
 		const disk = readGateState(orgDir);
-		if (disk.lastFireMs > 0 && now - disk.lastFireMs < MIN_TIME_BETWEEN_FIRES_MS) {
+		if (disk.lastFireMs > 0 && now - disk.lastFireMs < getMinTimeBetweenFiresMs()) {
 			return;
 		}
 
@@ -373,7 +466,7 @@ export default function maintenanceGate(pi: ExtensionAPI): void {
 
 		// FLOOR 2 — wall-clock since the current release cursor. Prevents
 		// firing right after the user just released the previous segment.
-		if (now - state.releaseCursorTimeMs < MIN_TIME_SINCE_RELEASE_MS) {
+		if (now - state.releaseCursorTimeMs < getMinTimeSinceReleaseMs()) {
 			return;
 		}
 
@@ -383,7 +476,7 @@ export default function maintenanceGate(pi: ExtensionAPI): void {
 			branch,
 			Math.max(0, state.releaseCursorBranchLength),
 		);
-		if (opMsgs < MIN_OP_MSGS_SINCE_RELEASE) return;
+		if (opMsgs < getMinOpMsgsSinceRelease()) return;
 
 		// DEFENSE-IN-DEPTH — if the branch already contains a fire marker
 		// in this segment (e.g. state was lost mid-session), don't fire
