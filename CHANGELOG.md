@@ -5,6 +5,21 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-05-29 — In-app update notification
+
+Small follow-up to v0.6.0. Adds a passive update-check pill in the StatusBar so future releases (this one and onward) become discoverable from inside the deck instead of requiring users to run `npm outdated -g`.
+
+### Added
+
+- **`↑ X.Y.Z available` pill** at the bottom-right of the deck chrome whenever the running version is behind what's published on npm. Click → opens the GitHub release notes in a new tab. The user runs `npm install -g omp-deck@latest` themselves; the deck never auto-updates. (#10)
+- **`GET /api/version`** returns `{ current, latest, updateAvailable, lastCheckedAt, releaseUrl, packageUrl, disabled }`. The pill is just a thin renderer over this.
+- **24-hour cached version check** against `https://registry.npmjs.org/omp-deck`. Same destination as `npm install`; no version-as-fingerprint, no analytics, no extra outbound traffic beyond one ~1 KB request per day.
+- **Kill switch:** `OMP_DECK_DISABLE_UPDATE_CHECK=1` short-circuits the entire feature (no cache read, no network, no pill). Set it in your managed `.env` if you're on a locked-down network or just don't want the chrome.
+- Cache lives at `<dataDir>/update-check.json` and is graceful on every failure mode (registry down, parse error, env disabled, malformed cache, version-compare failure) — the pill simply doesn't render.
+- Semver-aware comparison via `Bun.semver.order` (so `0.10.0 > 0.9.0`, prereleases handled correctly).
+- New protocol type: `VersionInfo`.
+- 10 new tests on the update-check module (33 assertions): disabled-flag handling, cache hits at newer / same / older versions, semver edge cases, registry-error state, first-call empty-state + background refresh, response-shape sanity.
+
 ## [0.6.0] — 2026-05-29 — First-run onboarding + provider clarity + reliability fixes
 
 Quality-of-life release driven by three live-demo reports plus a deliberate first-run-experience rewrite.
