@@ -5,13 +5,72 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
-### Added
+## [0.4.0] — 2026-05-28 — Plan mode, queued-prompt editing, todo live-sync, docs pass
 
-- **Plan mode in deck (TUI parity)** — T-105. Shift+Tab in the composer (or `/plan [on|off]` from the slash picker) toggles plan mode for the active session. While active, the agent gets the SDK's plan-mode system prompt + the `resolve` tool added to its active tool set; writes go through the `#enforcePlanModeToolDecision` intercept. When the agent calls `resolve apply` after writing `local://PLAN.md`, the deck surfaces a `PlanApproval` inline card in the chat with Reject / Approve / Edit & approve. Approve renames the plan to `local://<title>.md` and queues a synthetic execute prompt that runs in a new turn with the full tool set restored. Reject exits plan mode cleanly. State indicators: header pill, composer border tint (`accent-plan`), sidebar badge on the active session row. Lifts the T-83 `ext_ui_dialog` bridge pattern; ~620 lines across protocol, server bridge (15 unit tests covering enter/idempotent-enter/exit/approve/edit-and-approve/reject/CAS/cancel/dispose/path-traversal-rejection/snapshot-replay), web reducer + store actions, three components. Design doc: `kb://projects/omp-deck/plan-mode-design.md`.
+Mid-cycle release focused on user-visible polish to the chat loop. Plan mode brings TUI parity to the deck so the agent can propose work before it executes. Queued prompts you sent mid-stream can now be edited or cancelled. The Inspector's todo panel updates intra-turn instead of waiting for SDK reminder ticks. Session rename failures surface their error instead of silently reverting. The README was rewritten human-forward and the supporting docs got an accuracy pass.
+
+### Plan mode (T-105)
+
+- **Shift+Tab in the composer** (or **`/plan [on|off]`** from the slash picker) toggles plan mode for the active session. Equivalent to the TUI's `app.plan.toggle`; the slash command is client-virtual — intercepted by the composer and dispatched as a `set_plan_mode` WS frame without round-tripping through the agent.
+- **While active**, the agent gets the SDK's plan-mode system prompt + the `resolve` tool spliced into its active tool set. The SDK's `#enforcePlanModeToolDecision` intercept gates writes. The agent investigates with read-only tools and writes the finalized plan to `local://PLAN.md`.
+- **When the agent calls `resolve apply`**, the deck surfaces a `PlanApproval` inline card in the chat with **Reject** / **Approve** / **Edit & approve**. Approve renames `local://PLAN.md` to `local://<title>.md` and queues a synthetic execute prompt that runs in a new turn with the full tool set restored. Reject exits plan mode cleanly with no rename.
+- **State indicators**: header pill, composer border tint (`accent-plan`), sidebar badge on the active session row.
+- **Robust to reconnect**: pending plan proposals are replayed via the bridge's `subscribePlanModeFrames` mechanism so a page reload mid-approval re-renders the card immediately.
+- New protocol frames: `set_plan_mode`, `plan_response`, `plan_mode_changed`, `plan_proposed`, `plan_proposal_resolved`.
+- New bridge surface: `PlanModeBridge` per-session state machine wrapping `setStandingResolveHandler` from the SDK; composes `resolvePlanTitle` + `renameApprovedPlanFile`.
+- Server-side hardening: `sanitizeFinalPath` rejects path-traversal attempts (`local://../escape.md`) and falls back to the SDK-suggested final path.
+- 15 unit tests covering enter / idempotent re-enter / exit / approve-happy-path / edit-and-approve / title-override / path-traversal-rejection / reject / double-click CAS / cancel-mid-approval / dispose / snapshot-replay.
+- Design doc: `kb://projects/omp-deck/plan-mode-design.md`.
+
+### Queued-prompt edit + cancel
+
+- **Hover any queued bubble** in the chat to reveal Pencil + X buttons. Edit opens an inline textarea (Enter saves, Esc discards, empty save = cancel). Cancel drops the entry without prompting.
+- Bridge maintains a `shadowQueue<QueuedPromptWire[]>` mirrored from the SDK's pending-prompt queue. Each entry carries a stable id the client uses to target a specific entry for cancel/edit.
+- `cancelQueuedById` / `editQueuedById` rebuild the SDK queue (synchronous `popLastQueuedMessage` loop + parallel re-enqueue) preserving order + ids — edits don't re-key the bubble.
+- `queue_state` event re-broadcasts the canonical queue after every mutation; reducer replaces wholesale.
+- `prompt_queued` shadow tracking aligns its text against the SDK's post-expansion store so slash-expanded prompts match on drain.
+- Session snapshot now carries `queuedPrompts`, so a page-reload subscriber sees the queue immediately instead of waiting for the next mutation.
+- Reducer test coverage: queue lifecycle + `queue_state` + snapshot hydration (16 tests in `apps/web/src/lib/reducer.test.ts`).
+
+### Todo panel live-sync (T-106)
+
+- The Inspector's TodoPanel was visibly stale between an agent's `todo_write` call and the SDK's next `todo_reminder` tick (those fire only on reminder cycles, typically at turn boundaries). For long turns with many todo updates the panel showed pre-tick state until the cycle caught up.
+- Bridge now extends the existing `session.subscribe` listener in `attach()` to detect `tool_execution_end` with `toolName=todo_write` and emit a synthetic `todo_phases_set` event carrying `session.getTodoPhases()`. Same pattern as the existing `context_usage` synthesis on `turn_end` / `agent_end` / `compaction_complete`.
+- Reducer handles `todo_phases_set` by calling `normalizeTodoPhases(event.todoPhases)` directly. New event type avoids reusing `todo_reminder`'s quirky single-phase-wrapped-in-array shape.
+- Tests: dedicated `todo-synthesis.test.ts` (5 cases) + 4 reducer cases.
+
+### Session rename — surface failures
+
+- The omp SDK's `setSessionName` performs an atomic-replace on the session journal: write to `.jsonl.tmp`, `fs.rename` over the original. **On Windows** `fs.rename` fails with `EPERM` when the destination is held open — and the live session always holds the journal open. So pressing Enter to rename produced a 500 error the store swallowed via `console.warn`; the input closed; the UI showed the old name with no indication anything had failed.
+- Store: stopped swallowing the rename rejection; lets it propagate.
+- ChatHeader: keeps the input open on failure, renders an inline danger-toned error span next to the rename input with `role=alert` + `aria-describedby`. Successful renames still close as before.
+- Upstream: the underlying Windows EPERM bug is in the SDK's atomic-rename helper — to be raised separately with the omp folks.
+
+### Universal `/plan` slash command discoverability
+
+Removed the composer pill button in favor of the slash-command entry. Plan mode is now discoverable via five surfaces, all keyboard-/touch-friendly:
+
+| Entry point | Where | When useful |
+|---|---|---|
+| `Shift+Tab` | Composer keyboard | Power users (matches TUI muscle memory) |
+| `/plan` | Slash picker | Mouse/touch users; users browsing the picker |
+| Header pill | Top of session pane | Visual state at a glance |
+| Composer border tint | Around the textarea | Peripheral state cue while typing |
+| Sidebar badge | Session row in sidebar | See which session is in plan mode at a glance |
 
 ### Fixed
 
 - Fresh-clone `bun run dev` no longer fails on missing `TELEGRAM_BOT_TOKEN`. The root `dev` script was fanning out across every workspace (`--filter='@omp-deck/*'`) and bringing the standalone telegram bridge along with the deck server + web — the bridge's config validator throws if no bot token is set, so first-run users would hit an error before the UI ever came up. The bridge has always been opt-in (Settings → Messaging → Start, or `bun run dev:telegram`); the dev script now restricts itself to `@omp-deck/server` + `@omp-deck/web` to match the documented behavior in `CONTRIBUTING.md`.
+
+### Docs
+
+- README rewritten human-forward — leads with the feeling of using the cockpit (track work as work, ask from anywhere, decide carefully, capture without context-switching, remember across sessions) rather than a feature inventory. Concrete value props as section headers. Tech detail moved to docs links.
+- `docs/tui-parity.md`: plan mode + ask-tool moved from Future to ✓ (both shipped). Themes row adds Horizon. New row for queued-prompt edit/cancel. Todos panel mentions the `todo_phases_set` synthesis. KB cockpit added to the deck-only list.
+- `docs/slash-commands.md`: `/plan` section + scope row + client-virtual mechanism explanation.
+- `docs/architecture.md`: synthetic events expanded (`todo_phases_set`, `prompt_queued` + `queue_state`, plan-mode trio, `ext_ui_dialog` pair). Broadcast frames list updated. Database tables list fleshed out with routines V1 (`routine_step_runs`, `routine_state`), `env_settings`, `bridge_state`. Stale v0.1 build caveat removed.
+- `docs/themes.md`: third theme (Horizon) documented.
+- `docs/configuration.md`: `OMP_DECK_AUTO_START` default corrected from "empty (disabled)" to `/start` (the actual default — it's opt-OUT, not opt-in).
+- `CONTRIBUTING.md`: "No unit-test harness" claim retired — 149+ tests across server, 16+ in web/reducer; coverage is partial but real.
 
 ## [0.3.0] — V1 routines, V2 canvas, reliability + notifications, orientation + chat polish
 

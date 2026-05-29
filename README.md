@@ -6,7 +6,7 @@ The [`omp`](https://github.com/can1357/oh-my-pi) terminal agent is excellent at 
 
 omp-deck is the cockpit you drive omp from when the terminal isn't enough. Same agent, same authentication, same models. Different surface — one that gives the work a place to live.
 
-> **Status:** v0.3.0 — plan mode, queued-prompt editing, todo live-sync, KB cockpit. See [CHANGELOG.md](./CHANGELOG.md).
+> **Status:** v0.4.0 — plan mode, queued-prompt editing, todo live-sync. See [CHANGELOG.md](./CHANGELOG.md).
 
 ![omp-deck chat surface — live tool calls + orientation summary](./docs/screenshots/00-hero-chat-paper.png)
 
