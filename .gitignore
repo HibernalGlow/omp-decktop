@@ -62,3 +62,4 @@ apps/server/src/templates/paper-trading-*.yaml
 Restart-OMP-Deck.cmd
 apps/desktop/build/*
 data/deck.db*
+apps/desktop/wails_windows_amd64.syso

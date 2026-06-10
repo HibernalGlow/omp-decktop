@@ -136,6 +136,19 @@ func findBun() (string, error) {
 	return path, nil
 }
 
+func resolveDefaultWebDist(repoRoot string) string {
+	candidates := []string{
+		filepath.Join(repoRoot, "apps", "web", "dist-zh"),
+		filepath.Join(repoRoot, "apps", "web", "dist"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	return filepath.Join(repoRoot, "apps", "web", "dist")
+}
+
 // Start launches the Bun server as a child process.
 func (sp *ServerProcess) Start() error {
 	port, err := resolvePort()
@@ -172,10 +185,13 @@ func (sp *ServerProcess) Start() error {
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("OMP_DECK_HOST=%s", sp.host),
 		fmt.Sprintf("OMP_DECK_PORT=%d", sp.port),
-		fmt.Sprintf("OMP_DECK_WEB_DIST=%s", filepath.Join(repoRoot, "apps", "web", "dist")),
 		fmt.Sprintf("OMP_DECK_STARTER_SKILLS_DIR=%s", filepath.Join(repoRoot, "starter-skills")),
 		fmt.Sprintf("OMP_DECK_STARTER_EXTENSIONS_DIR=%s", filepath.Join(repoRoot, "starter-extensions")),
 	)
+
+	if os.Getenv("OMP_DECK_WEB_DIST") == "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("OMP_DECK_WEB_DIST=%s", resolveDefaultWebDist(repoRoot)))
+	}
 
 	log.Printf("[desktop] starting bun server: %s %s (port %d)", bunPath, serverEntry, port)
 

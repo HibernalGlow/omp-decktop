@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"github.com/omp-deck/desktop/internal/runtime"
@@ -12,14 +13,14 @@ func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
 	log.Println("[desktop] OMP Deck starting...")
 
-	// Start the Bun server as a child process
+	// Start the Bun server as a child process.
 	server := &runtime.ServerProcess{}
 	if err := server.Start(); err != nil {
 		log.Fatalf("[desktop] failed to start server: %v", err)
 	}
 	defer server.Stop()
 
-	// Wait for the server to become healthy
+	// Wait for the server to become healthy.
 	log.Println("[desktop] waiting for server to become healthy...")
 	if err := server.WaitForHealthy(30 * time.Second); err != nil {
 		log.Fatalf("[desktop] server health check failed: %v", err)
@@ -28,17 +29,22 @@ func main() {
 	serverURL := server.URL()
 	log.Printf("[desktop] server ready at %s", serverURL)
 
-	// Create the Wails application — no embedded assets needed,
-	// we load the Bun server URL directly.
+	// `wails3 dev` injects FRONTEND_DEVSERVER_URL and blocks startup until
+	// that URL responds. This desktop shell does not use a separate Vite
+	// server; it always loads the Bun-backed deck URL directly.
+	_ = os.Setenv("FRONTEND_DEVSERVER_URL", serverURL)
+
+	// Create the Wails application. No embedded assets are needed because the
+	// window loads the Bun server URL directly.
 	app := application.New(application.Options{
 		Name:        "OMP Deck",
-		Description: "OMP Deck Desktop — AI agent management",
+		Description: "OMP Deck Desktop - AI agent management",
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
 
-	// Create the main window pointing to the Bun server
+	// Create the main window pointing to the Bun server.
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:  "OMP Deck",
 		Width:  1280,
@@ -52,7 +58,7 @@ func main() {
 		URL:              serverURL + "/",
 	})
 
-	// Run the application (blocks until window is closed)
+	// Run the application (blocks until window is closed).
 	if err := app.Run(); err != nil {
 		log.Fatalf("[desktop] application error: %v", err)
 	}
