@@ -38,6 +38,8 @@ async function localizeGeneratedFiles(): Promise<void> {
 	);
 	await transformGeneratedFile(path.join("components", "NotificationToast.tsx"), localizeNotificationToast);
 	await transformGeneratedFile(path.join("components", "Layout.tsx"), localizeLayout);
+	await transformGeneratedFile(path.join("i18n", "index.ts"), localizeI18nIndex);
+	await transformGeneratedFile(path.join("views", "SettingsView.tsx"), localizeSettingsView);
 }
 
 async function transformGeneratedFile(relPath: string, transform: (source: string) => string): Promise<void> {
@@ -204,6 +206,119 @@ function localizeLayout(source: string): string {
 		'title={allCollapsed ? "Expand all tool cards" : "Collapse all tool cards"}',
 		'title={allCollapsed ? t("layout.expandAllToolCards") : t("layout.collapseAllToolCards")}',
 		"Layout: tool cards title",
+	);
+	return next;
+}
+
+function localizeI18nIndex(source: string): string {
+	return replaceOne(
+		source,
+		/function detectLocale\(\): string \{[\s\S]*?\n\}/,
+		`function detectLocale(): string {
+\ttry {
+\t\tconst stored = localStorage.getItem(LOCALE_STORAGE_KEY);
+\t\tif (stored && (stored === "en" || stored === "zh-CN")) return stored;
+\t} catch {
+\t\t/* quota / private browsing */
+\t}
+\treturn "zh-CN";
+\t}`,
+		"i18n index: default zh locale",
+	);
+}
+
+function localizeSettingsView(source: string): string {
+	let next = injectNamedImport(source, "@/i18n/useLocale", "useLocale");
+	next = replaceOne(
+		next,
+		/const SECTIONS = \[[\s\S]*?\] as const;/,
+		`const SECTIONS = [
+\t{ id: "env", label: "环境变量", description: "进程及 Deck 管理的变量" },
+\t{ id: "providers", label: "服务商", description: "OAuth 登录与 API 密钥状态" },
+\t{ id: "messaging", label: "消息桥接", description: "Telegram 及未来的聊天桥接" },
+\t{ id: "orientation", label: "引导配置", description: "Prelude、/start、维护门控" },
+\t{ id: "appearance", label: "外观", description: "主题、颜色、字体" },
+\t{ id: "language", label: "语言", description: "界面显示语言" },
+\t{ id: "workspaces", label: "工作区", description: "固定根目录与显示名称" },
+\t{ id: "notifications", label: "通知", description: "空闲提醒与免打扰时段" },
+\t{ id: "about", label: "关于", description: "版本、路径、诊断信息" },
+] as const;`,
+		"SettingsView: localized sections",
+	);
+	next = replaceOne(next, '<div className="meta">Settings</div>', '<div className="meta">设置</div>', "SettingsView: top title");
+	next = replaceOne(next, '<div className="text-xs text-ink-3">Configure this local deck instance</div>', '<div className="text-xs text-ink-3">配置此本地 Deck 实例</div>', "SettingsView: top subtitle");
+	next = replaceOne(
+		next,
+		`) : selected === "appearance" ? (
+\t\t\t\t\t\t\t\t<AppearanceSection />
+\t\t\t\t\t\t\t) : selected === "notifications" ? (`,
+		`) : selected === "appearance" ? (
+\t\t\t\t\t\t\t\t<AppearanceSection />
+\t\t\t\t\t\t\t) : selected === "language" ? (
+\t\t\t\t\t\t\t\t<LanguageSection />
+\t\t\t\t\t\t\t) : selected === "notifications" ? (`,
+		"SettingsView: language section branch",
+	);
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Environment variables</h1>', '<h1 className="text-xl font-semibold tracking-tight">环境变量</h1>', "SettingsView: env title");
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Messaging bridges</h1>', '<h1 className="text-xl font-semibold tracking-tight">消息桥接</h1>', "SettingsView: messaging title");
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Appearance</h1>', '<h1 className="text-xl font-semibold tracking-tight">外观</h1>', "SettingsView: appearance title");
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Notifications</h1>', '<h1 className="text-xl font-semibold tracking-tight">通知</h1>', "SettingsView: notifications title");
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Orientation</h1>', '<h1 className="text-xl font-semibold tracking-tight">引导配置</h1>', "SettingsView: orientation title");
+	next = replaceOne(next, '<div className="meta">Settings notes</div>', '<div className="meta">设置说明</div>', "SettingsView: notes title");
+	next = replaceOne(next, '<p>Secrets are masked in list responses. Replace values here; do not reveal unless using the loopback API directly.</p>', '<p>列表中的敏感信息会被掩码显示。在这里替换即可；除非你直接调用本机回环 API，否则不要明文暴露。</p>', "SettingsView: notes body");
+	next = replaceOne(next, '<div className="p-3 text-xs text-ink-3">Settings</div>', '<div className="p-3 text-xs text-ink-3">设置</div>', "SettingsView: side rail");
+	next = replaceOne(next, '<h1 className="mt-2 text-xl font-semibold">Not built yet</h1>', '<h1 className="mt-2 text-xl font-semibold">尚未构建</h1>', "SettingsView: stub title");
+	next = replaceOne(next, '<p className="mt-1 text-sm text-ink-3">This section is reserved so the settings layout is stable.</p>', '<p className="mt-1 text-sm text-ink-3">此区域仅作占位，以保持设置布局稳定。</p>', "SettingsView: stub body");
+	next = replaceOne(
+		next,
+		/if \(loading\) \{\s*return <div className="font-mono text-2xs text-ink-3">Loading providers[\s\S]*?<\/div>;\s*\}/,
+		'if (loading) {\n\t\treturn <div className="font-mono text-2xs text-ink-3">正在加载服务商...</div>;\n\t}',
+		"SettingsView: providers loading",
+	);
+	next = replaceOne(next, '<h2 className="meta">Providers</h2>', '<h2 className="meta">服务商</h2>', "SettingsView: providers meta");
+	next = replaceOne(
+		next,
+		'function StubSection({ section }: { section: Exclude<SectionId, "env" | "messaging" | "appearance" | "notifications"> }) {',
+		`function LanguageSection() {
+\tconst { locale, setLocale } = useLocale();
+\treturn (
+\t\t<div className="mx-auto max-w-3xl space-y-4">
+\t\t\t<div>
+\t\t\t\t<h1 className="text-xl font-semibold tracking-tight">语言</h1>
+\t\t\t\t<p className="mt-1 text-sm text-ink-3">切换界面显示语言。设置会保存在当前桌面应用的本地存储中。</p>
+\t\t\t</div>
+\t\t\t<div className="rounded-md border border-line bg-paper p-4">
+\t\t\t\t<div className="space-y-2">
+\t\t\t\t\t<button
+\t\t\t\t\t\ttype="button"
+\t\t\t\t\t\tonClick={() => setLocale("zh-CN")}
+\t\t\t\t\t\tclassName={cn(
+\t\t\t\t\t\t\t"flex w-full items-center justify-between rounded-md border px-3 py-3 text-left transition-colors",
+\t\t\t\t\t\t\tlocale === "zh-CN" ? "border-accent bg-accent-soft/20 text-accent" : "border-line hover:bg-paper-2",
+\t\t\t\t\t\t)}
+\t\t\t\t\t>
+\t\t\t\t\t\t<span className="font-medium">简体中文</span>
+\t\t\t\t\t\t<span className="font-mono text-2xs text-ink-3">zh-CN</span>
+\t\t\t\t\t</button>
+\t\t\t\t\t<button
+\t\t\t\t\t\ttype="button"
+\t\t\t\t\t\tonClick={() => setLocale("en")}
+\t\t\t\t\t\tclassName={cn(
+\t\t\t\t\t\t\t"flex w-full items-center justify-between rounded-md border px-3 py-3 text-left transition-colors",
+\t\t\t\t\t\t\tlocale === "en" ? "border-accent bg-accent-soft/20 text-accent" : "border-line hover:bg-paper-2",
+\t\t\t\t\t\t)}
+\t\t\t\t\t>
+\t\t\t\t\t\t<span className="font-medium">English</span>
+\t\t\t\t\t\t<span className="font-mono text-2xs text-ink-3">en</span>
+\t\t\t\t\t</button>
+\t\t\t\t</div>
+\t\t\t</div>
+\t\t</div>
+\t);
+}
+
+function StubSection({ section }: { section: Exclude<SectionId, "env" | "messaging" | "appearance" | "notifications" | "language"> }) {`,
+		"SettingsView: insert language section",
 	);
 	return next;
 }
