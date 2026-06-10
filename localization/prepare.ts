@@ -1,5 +1,63 @@
 import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+	DETECT_LOCALE_FN,
+	LANGUAGE_SECTION_CODE,
+	LAYOUT_CLOSE_ARIA,
+	LAYOUT_CLOSE_PANELS_ARIA,
+	LAYOUT_HOOK,
+	LAYOUT_INSPECTOR_LABEL,
+	LAYOUT_MOBILE_CLOSE_HOOK,
+	LAYOUT_TOGGLE_INSP_ARIA,
+	LAYOUT_TOGGLE_INSP_TITLE,
+	LAYOUT_TOGGLE_SESS_ARIA,
+	LAYOUT_TOGGLE_SESS_TITLE,
+	LAYOUT_TOOL_CARDS_ARIA,
+	LAYOUT_TOOL_CARDS_HOOK,
+	LAYOUT_TOOL_CARDS_TITLE,
+	NAV_RAIL_HOOK,
+	NAV_RAIL_ITEMS,
+	NAV_RAIL_LABEL,
+	NAV_RAIL_SETTINGS_ARIA,
+	NAV_RAIL_SETTINGS_TITLE,
+	NOTIFICATION_BANNER_BLOCKED,
+	NOTIFICATION_BANNER_DISMISS,
+	NOTIFICATION_BANNER_ENABLE,
+	NOTIFICATION_BANNER_HOOK,
+	NOTIFICATION_BANNER_NOT_NOW,
+	NOTIFICATION_BANNER_PROMPT,
+	NOTIFICATION_TOAST_DISMISS_ARIA,
+	NOTIFICATION_TOAST_HOOK,
+	NOTIFICATION_TOAST_VIEW,
+	SETTINGS_APPEARANCE_TITLE,
+	SETTINGS_ENV_TITLE,
+	SETTINGS_LANG_BRANCH,
+	SETTINGS_MESSAGING_TITLE,
+	SETTINGS_NOTES_BODY,
+	SETTINGS_NOTES_TITLE,
+	SETTINGS_NOTIFICATIONS_TITLE,
+	SETTINGS_ORIENTATION_TITLE,
+	SETTINGS_PROVIDERS_LOADING,
+	SETTINGS_PROVIDERS_META,
+	SETTINGS_SIDE_RAIL,
+	SETTINGS_STUB_BODY,
+	SETTINGS_STUB_SECTION_SIG,
+	SETTINGS_STUB_TITLE,
+	SETTINGS_TOP_SUBTITLE,
+	SETTINGS_TOP_TITLE,
+	SIDEBAR_ALL_WS_OPTION,
+	SIDEBAR_HOOK,
+	SIDEBAR_LIVE_ARIA,
+	SIDEBAR_NEW_SESSION,
+	SIDEBAR_NO_SESSIONS,
+	SIDEBAR_PLAN_MODE_TITLE,
+	SIDEBAR_REFRESH_SESS_ARIA,
+	SIDEBAR_REFRESH_WS_ARIA,
+	SIDEBAR_SESSION_ROW_HOOK,
+	SIDEBAR_SESSIONS_SUMMARY,
+	SIDEBAR_WORKSPACE_LABEL,
+	ZH_SETTINGS_SECTIONS,
+} from "./translations.js";
 
 const repoRoot = process.cwd();
 const webRoot = path.join(repoRoot, "apps", "web");
@@ -67,34 +125,11 @@ async function writeLocalizedMain(): Promise<void> {
 
 function localizeNavRail(source: string): string {
 	let next = injectNamedImport(source, "react-i18next", "useTranslation");
-	next = replaceOne(
-		next,
-		/const ITEMS: ReadonlyArray<\{[\s\S]*?\n\];/,
-		`const ITEMS: ReadonlyArray<{
-\tto: string;
-\tlabelKey: string;
-\ticon: typeof MessagesSquare;
-}> = [
-\t{ to: "/", labelKey: "nav.chat", icon: MessagesSquare },
-\t{ to: "/tasks", labelKey: "nav.tasks", icon: KanbanSquare },
-\t{ to: "/routines", labelKey: "nav.routines", icon: Clock },
-\t{ to: "/inbox", labelKey: "nav.inbox", icon: Inbox },
-\t{ to: "/marketplace", labelKey: "nav.marketplace", icon: Store },
-\t{ to: "/skills", labelKey: "nav.skills", icon: Sparkles },
-\t{ to: "/kb", labelKey: "nav.knowledge", icon: BookOpen },
-\t{ to: "/integrations", labelKey: "nav.integrations", icon: Plug },
-];`,
-		"NavRail: items config",
-	);
-	next = replaceOne(
-		next,
-		/export function NavRail\(\) \{\s*return \(/,
-		'export function NavRail() {\n\tconst { t } = useTranslation();\n\treturn (',
-		"NavRail: inject translation hook",
-	);
-	next = replaceOne(next, "item.label", "t(item.labelKey)", "NavRail: item label usage");
-	next = replaceOne(next, 'title="Settings"', 'title={t("nav.settings")}', "NavRail: settings title");
-	next = replaceOne(next, 'aria-label="Settings"', 'aria-label={t("nav.settings")}', "NavRail: settings aria");
+	next = replaceOne(next, /const ITEMS: ReadonlyArray<\{[\s\S]*?\n\];/, NAV_RAIL_ITEMS, "NavRail: items config");
+	next = replaceOne(next, /export function NavRail\(\) \{\s*return \(/, NAV_RAIL_HOOK, "NavRail: inject translation hook");
+	next = replaceOne(next, "item.label", NAV_RAIL_LABEL, "NavRail: item label usage");
+	next = replaceOne(next, 'title="Settings"', NAV_RAIL_SETTINGS_TITLE, "NavRail: settings title");
+	next = replaceOne(next, 'aria-label="Settings"', NAV_RAIL_SETTINGS_ARIA, "NavRail: settings aria");
 	return next;
 }
 
@@ -103,29 +138,29 @@ function localizeSidebar(source: string): string {
 	next = replaceOne(
 		next,
 		/export function Sidebar\(\) \{\s*const workspaces = useStore\(\(s\) => s\.workspaces\);/,
-		'export function Sidebar() {\n\tconst { t } = useTranslation();\n\tconst workspaces = useStore((s) => s.workspaces);',
+		SIDEBAR_HOOK,
 		"Sidebar: inject root translation hook",
 	);
-	next = replaceOne(next, '<div className="meta">Workspace</div>', '<div className="meta">{t("sidebar.workspace")}</div>', "Sidebar: workspace label");
-	next = replaceOne(next, 'aria-label="Refresh workspaces"', 'aria-label={t("sidebar.refreshWorkspaces")}', "Sidebar: refresh workspaces");
-	next = replaceOne(next, '<option value="">(all workspaces)</option>', '<option value="">{t("sidebar.allWorkspaces")}</option>', "Sidebar: all workspaces option");
-	next = replaceOne(next, />\s*New session\s*</, '>{t("sidebar.newSession")}<', "Sidebar: new session button");
+	next = replaceOne(next, '<div className="meta">Workspace</div>', SIDEBAR_WORKSPACE_LABEL, "Sidebar: workspace label");
+	next = replaceOne(next, 'aria-label="Refresh workspaces"', SIDEBAR_REFRESH_WS_ARIA, "Sidebar: refresh workspaces");
+	next = replaceOne(next, '<option value="">(all workspaces)</option>', SIDEBAR_ALL_WS_OPTION, "Sidebar: all workspaces option");
+	next = replaceOne(next, />\s*New session\s*</, SIDEBAR_NEW_SESSION, "Sidebar: new session button");
 	next = replaceOne(
 		next,
 		/<div className="meta">Sessions[\s\S]*?\{filtered\.length\}<\/div>/,
-		'<div className="meta">{t("sidebar.sessions")} / {filtered.length}</div>',
+		SIDEBAR_SESSIONS_SUMMARY,
 		"Sidebar: sessions summary",
 	);
-	next = replaceOne(next, 'aria-label="Refresh sessions"', 'aria-label={t("sidebar.refreshSessions")}', "Sidebar: refresh sessions");
-	next = replaceOne(next, />\s*No sessions yet\.\s*</, '>{t("sidebar.noSessions")}<', "Sidebar: empty state");
+	next = replaceOne(next, 'aria-label="Refresh sessions"', SIDEBAR_REFRESH_SESS_ARIA, "Sidebar: refresh sessions");
+	next = replaceOne(next, />\s*No sessions yet\.\s*</, SIDEBAR_NO_SESSIONS, "Sidebar: empty state");
 	next = replaceOne(
 		next,
 		/onClick: \(\) => void;\n\}\) \{\n\treturn \(/,
-		'onClick: () => void;\n}) {\n\tconst { t } = useTranslation();\n\treturn (',
+		SIDEBAR_SESSION_ROW_HOOK,
 		"Sidebar: inject SessionRow translation hook",
 	);
-	next = replaceOne(next, 'aria-label="live"', 'aria-label={t("common.status.active")}', "Sidebar: live status");
-	next = replaceOne(next, 'title="Plan mode active"', 'title={t("common.status.active")}', "Sidebar: plan mode title");
+	next = replaceOne(next, 'aria-label="live"', SIDEBAR_LIVE_ARIA, "Sidebar: live status");
+	next = replaceOne(next, 'title="Plan mode active"', SIDEBAR_PLAN_MODE_TITLE, "Sidebar: plan mode title");
 	return next;
 }
 
@@ -134,24 +169,24 @@ function localizeNotificationPermissionBanner(source: string): string {
 	next = replaceOne(
 		next,
 		/export function NotificationPermissionBanner\(\): JSX\.Element \| null \{\s*const \{ permission, requestPermission, bannerDismissed, dismissBanner \} = useNotificationPermission\(\);/,
-		'export function NotificationPermissionBanner(): JSX.Element | null {\n\tconst { t } = useTranslation();\n\tconst { permission, requestPermission, bannerDismissed, dismissBanner } = useNotificationPermission();',
+		NOTIFICATION_BANNER_HOOK,
 		"NotificationPermissionBanner: inject translation hook",
 	);
 	next = replaceOne(
 		next,
 		/<span>\s*OS notifications are blocked\.[\s\S]*?<\/span>/,
-		'<span>{t("notifications.permission.blocked")}</span>',
+		NOTIFICATION_BANNER_BLOCKED,
 		"NotificationPermissionBanner: blocked copy",
 	);
-	next = replaceOne(next, />\s*Dismiss\s*</, '>{t("common.actions.dismiss")}<', "NotificationPermissionBanner: dismiss button");
+	next = replaceOne(next, />\s*Dismiss\s*</, NOTIFICATION_BANNER_DISMISS, "NotificationPermissionBanner: dismiss button");
 	next = replaceOne(
 		next,
 		/<span>\s*Enable browser notifications so the deck can ping you when a routine fails or needs attention\.\s*<\/span>/,
-		'<span>{t("notifications.permission.prompt")}</span>',
+		NOTIFICATION_BANNER_PROMPT,
 		"NotificationPermissionBanner: prompt copy",
 	);
-	next = replaceOne(next, />\s*Enable notifications\s*</, '>{t("notifications.permission.enable")}<', "NotificationPermissionBanner: enable button");
-	next = replaceOne(next, />\s*Not now\s*</, '>{t("notifications.permission.notNow")}<', "NotificationPermissionBanner: not now button");
+	next = replaceOne(next, />\s*Enable notifications\s*</, NOTIFICATION_BANNER_ENABLE, "NotificationPermissionBanner: enable button");
+	next = replaceOne(next, />\s*Not now\s*</, NOTIFICATION_BANNER_NOT_NOW, "NotificationPermissionBanner: not now button");
 	return next;
 }
 
@@ -160,11 +195,11 @@ function localizeNotificationToast(source: string): string {
 	next = replaceOne(
 		next,
 		/export function NotificationToast\(\): JSX\.Element \| null \{\s*const notifications = useStore\(\(s\) => s\.notifications\);/,
-		'export function NotificationToast(): JSX.Element | null {\n\tconst { t } = useTranslation();\n\tconst notifications = useStore((s) => s.notifications);',
+		NOTIFICATION_TOAST_HOOK,
 		"NotificationToast: inject translation hook",
 	);
-	next = replaceOne(next, />\s*View\s*</, '>{t("notifications.toast.view")}<', "NotificationToast: view action");
-	next = replaceOne(next, 'aria-label="Dismiss notification"', 'aria-label={t("notifications.toast.dismissNotification")}', "NotificationToast: dismiss aria");
+	next = replaceOne(next, />\s*View\s*</, NOTIFICATION_TOAST_VIEW, "NotificationToast: view action");
+	next = replaceOne(next, 'aria-label="Dismiss notification"', NOTIFICATION_TOAST_DISMISS_ARIA, "NotificationToast: dismiss aria");
 	return next;
 }
 
@@ -173,38 +208,38 @@ function localizeLayout(source: string): string {
 	next = replaceOne(
 		next,
 		/export function Layout\(\{ sidebar, main, inspector, topBar \}: Props\) \{\s*const sidebarOpen = useStore\(\(s\) => s\.sidebarOpen\);/,
-		'export function Layout({ sidebar, main, inspector, topBar }: Props) {\n\tconst { t } = useTranslation();\n\tconst sidebarOpen = useStore((s) => s.sidebarOpen);',
+		LAYOUT_HOOK,
 		"Layout: inject root translation hook",
 	);
-	next = replaceOne(next, 'aria-label="Toggle sessions"', 'aria-label={t("layout.toggleSessions")}', "Layout: toggle sessions aria");
-	next = replaceOne(next, 'title="Toggle sessions"', 'title={t("layout.toggleSessions")}', "Layout: toggle sessions title");
-	next = replaceOne(next, 'aria-label="Toggle inspector"', 'aria-label={t("layout.toggleInspector")}', "Layout: toggle inspector aria");
-	next = replaceOne(next, 'title="Toggle inspector"', 'title={t("layout.toggleInspector")}', "Layout: toggle inspector title");
-	next = replaceOne(next, 'aria-label="Close panels"', 'aria-label={t("layout.closePanels")}', "Layout: close panels aria");
+	next = replaceOne(next, 'aria-label="Toggle sessions"', LAYOUT_TOGGLE_SESS_ARIA, "Layout: toggle sessions aria");
+	next = replaceOne(next, 'title="Toggle sessions"', LAYOUT_TOGGLE_SESS_TITLE, "Layout: toggle sessions title");
+	next = replaceOne(next, 'aria-label="Toggle inspector"', LAYOUT_TOGGLE_INSP_ARIA, "Layout: toggle inspector aria");
+	next = replaceOne(next, 'title="Toggle inspector"', LAYOUT_TOGGLE_INSP_TITLE, "Layout: toggle inspector title");
+	next = replaceOne(next, 'aria-label="Close panels"', LAYOUT_CLOSE_PANELS_ARIA, "Layout: close panels aria");
 	next = replaceOne(
 		next,
 		/function MobileCloseBar\(\{ onClose, side \}: \{ onClose: \(\) => void; side: "left" \| "right" \}\) \{\s*return \(/,
-		'function MobileCloseBar({ onClose, side }: { onClose: () => void; side: "left" | "right" }) {\n\tconst { t } = useTranslation();\n\treturn (',
+		LAYOUT_MOBILE_CLOSE_HOOK,
 		"Layout: inject MobileCloseBar translation hook",
 	);
-	next = replaceOne(next, />\s*Inspector\s*</, '>{t("layout.inspector")}<', "Layout: inspector label");
-	next = replaceOne(next, 'aria-label="Close"', 'aria-label={t("common.actions.close")}', "Layout: close button aria");
+	next = replaceOne(next, />\s*Inspector\s*</, LAYOUT_INSPECTOR_LABEL, "Layout: inspector label");
+	next = replaceOne(next, 'aria-label="Close"', LAYOUT_CLOSE_ARIA, "Layout: close button aria");
 	next = replaceOne(
 		next,
 		/function ToolCardsToggle\(\) \{\s*const allCollapsed = useStore\(\(s\) => s\.toolView\.allCollapsed\);/,
-		'function ToolCardsToggle() {\n\tconst { t } = useTranslation();\n\tconst allCollapsed = useStore((s) => s.toolView.allCollapsed);',
+		LAYOUT_TOOL_CARDS_HOOK,
 		"Layout: inject ToolCardsToggle translation hook",
 	);
 	next = replaceOne(
 		next,
 		'aria-label={allCollapsed ? "Expand all tool cards" : "Collapse all tool cards"}',
-		'aria-label={allCollapsed ? t("layout.expandAllToolCards") : t("layout.collapseAllToolCards")}',
+		LAYOUT_TOOL_CARDS_ARIA,
 		"Layout: tool cards aria",
 	);
 	next = replaceOne(
 		next,
 		'title={allCollapsed ? "Expand all tool cards" : "Collapse all tool cards"}',
-		'title={allCollapsed ? t("layout.expandAllToolCards") : t("layout.collapseAllToolCards")}',
+		LAYOUT_TOOL_CARDS_TITLE,
 		"Layout: tool cards title",
 	);
 	return next;
@@ -214,110 +249,45 @@ function localizeI18nIndex(source: string): string {
 	return replaceOne(
 		source,
 		/function detectLocale\(\): string \{[\s\S]*?\n\}/,
-		`function detectLocale(): string {
-\ttry {
-\t\tconst stored = localStorage.getItem(LOCALE_STORAGE_KEY);
-\t\tif (stored && (stored === "en" || stored === "zh-CN")) return stored;
-\t} catch {
-\t\t/* quota / private browsing */
-\t}
-\treturn "zh-CN";
-\t}`,
+		DETECT_LOCALE_FN,
 		"i18n index: default zh locale",
 	);
 }
 
 function localizeSettingsView(source: string): string {
 	let next = injectNamedImport(source, "@/i18n/useLocale", "useLocale");
-	next = replaceOne(
-		next,
-		/const SECTIONS = \[[\s\S]*?\] as const;/,
-		`const SECTIONS = [
-\t{ id: "env", label: "环境变量", description: "进程及 Deck 管理的变量" },
-\t{ id: "providers", label: "服务商", description: "OAuth 登录与 API 密钥状态" },
-\t{ id: "messaging", label: "消息桥接", description: "Telegram 及未来的聊天桥接" },
-\t{ id: "orientation", label: "引导配置", description: "Prelude、/start、维护门控" },
-\t{ id: "appearance", label: "外观", description: "主题、颜色、字体" },
-\t{ id: "language", label: "语言", description: "界面显示语言" },
-\t{ id: "workspaces", label: "工作区", description: "固定根目录与显示名称" },
-\t{ id: "notifications", label: "通知", description: "空闲提醒与免打扰时段" },
-\t{ id: "about", label: "关于", description: "版本、路径、诊断信息" },
-] as const;`,
-		"SettingsView: localized sections",
-	);
-	next = replaceOne(next, '<div className="meta">Settings</div>', '<div className="meta">设置</div>', "SettingsView: top title");
-	next = replaceOne(next, '<div className="text-xs text-ink-3">Configure this local deck instance</div>', '<div className="text-xs text-ink-3">配置此本地 Deck 实例</div>', "SettingsView: top subtitle");
+	next = replaceOne(next, /const SECTIONS = \[[\s\S]*?\] as const;/, ZH_SETTINGS_SECTIONS, "SettingsView: localized sections");
+	next = replaceOne(next, '<div className="meta">Settings</div>', SETTINGS_TOP_TITLE, "SettingsView: top title");
+	next = replaceOne(next, '<div className="text-xs text-ink-3">Configure this local deck instance</div>', SETTINGS_TOP_SUBTITLE, "SettingsView: top subtitle");
 	next = replaceOne(
 		next,
 		`) : selected === "appearance" ? (
 \t\t\t\t\t\t\t\t<AppearanceSection />
 \t\t\t\t\t\t\t) : selected === "notifications" ? (`,
-		`) : selected === "appearance" ? (
-\t\t\t\t\t\t\t\t<AppearanceSection />
-\t\t\t\t\t\t\t) : selected === "language" ? (
-\t\t\t\t\t\t\t\t<LanguageSection />
-\t\t\t\t\t\t\t) : selected === "notifications" ? (`,
+		SETTINGS_LANG_BRANCH,
 		"SettingsView: language section branch",
 	);
-	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Environment variables</h1>', '<h1 className="text-xl font-semibold tracking-tight">环境变量</h1>', "SettingsView: env title");
-	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Messaging bridges</h1>', '<h1 className="text-xl font-semibold tracking-tight">消息桥接</h1>', "SettingsView: messaging title");
-	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Appearance</h1>', '<h1 className="text-xl font-semibold tracking-tight">外观</h1>', "SettingsView: appearance title");
-	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Notifications</h1>', '<h1 className="text-xl font-semibold tracking-tight">通知</h1>', "SettingsView: notifications title");
-	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Orientation</h1>', '<h1 className="text-xl font-semibold tracking-tight">引导配置</h1>', "SettingsView: orientation title");
-	next = replaceOne(next, '<div className="meta">Settings notes</div>', '<div className="meta">设置说明</div>', "SettingsView: notes title");
-	next = replaceOne(next, '<p>Secrets are masked in list responses. Replace values here; do not reveal unless using the loopback API directly.</p>', '<p>列表中的敏感信息会被掩码显示。在这里替换即可；除非你直接调用本机回环 API，否则不要明文暴露。</p>', "SettingsView: notes body");
-	next = replaceOne(next, '<div className="p-3 text-xs text-ink-3">Settings</div>', '<div className="p-3 text-xs text-ink-3">设置</div>', "SettingsView: side rail");
-	next = replaceOne(next, '<h1 className="mt-2 text-xl font-semibold">Not built yet</h1>', '<h1 className="mt-2 text-xl font-semibold">尚未构建</h1>', "SettingsView: stub title");
-	next = replaceOne(next, '<p className="mt-1 text-sm text-ink-3">This section is reserved so the settings layout is stable.</p>', '<p className="mt-1 text-sm text-ink-3">此区域仅作占位，以保持设置布局稳定。</p>', "SettingsView: stub body");
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Environment variables</h1>', SETTINGS_ENV_TITLE, "SettingsView: env title");
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Messaging bridges</h1>', SETTINGS_MESSAGING_TITLE, "SettingsView: messaging title");
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Appearance</h1>', SETTINGS_APPEARANCE_TITLE, "SettingsView: appearance title");
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Notifications</h1>', SETTINGS_NOTIFICATIONS_TITLE, "SettingsView: notifications title");
+	next = replaceOne(next, '<h1 className="text-xl font-semibold tracking-tight">Orientation</h1>', SETTINGS_ORIENTATION_TITLE, "SettingsView: orientation title");
+	next = replaceOne(next, '<div className="meta">Settings notes</div>', SETTINGS_NOTES_TITLE, "SettingsView: notes title");
+	next = replaceOne(next, '<p>Secrets are masked in list responses. Replace values here; do not reveal unless using the loopback API directly.</p>', SETTINGS_NOTES_BODY, "SettingsView: notes body");
+	next = replaceOne(next, '<div className="p-3 text-xs text-ink-3">Settings</div>', SETTINGS_SIDE_RAIL, "SettingsView: side rail");
+	next = replaceOne(next, '<h1 className="mt-2 text-xl font-semibold">Not built yet</h1>', SETTINGS_STUB_TITLE, "SettingsView: stub title");
+	next = replaceOne(next, '<p className="mt-1 text-sm text-ink-3">This section is reserved so the settings layout is stable.</p>', SETTINGS_STUB_BODY, "SettingsView: stub body");
 	next = replaceOne(
 		next,
 		/if \(loading\) \{\s*return <div className="font-mono text-2xs text-ink-3">Loading providers[\s\S]*?<\/div>;\s*\}/,
-		'if (loading) {\n\t\treturn <div className="font-mono text-2xs text-ink-3">正在加载服务商...</div>;\n\t}',
+		SETTINGS_PROVIDERS_LOADING,
 		"SettingsView: providers loading",
 	);
-	next = replaceOne(next, '<h2 className="meta">Providers</h2>', '<h2 className="meta">服务商</h2>', "SettingsView: providers meta");
+	next = replaceOne(next, '<h2 className="meta">Providers</h2>', SETTINGS_PROVIDERS_META, "SettingsView: providers meta");
 	next = replaceOne(
 		next,
 		'function StubSection({ section }: { section: Exclude<SectionId, "env" | "messaging" | "appearance" | "notifications"> }) {',
-		`function LanguageSection() {
-\tconst { locale, setLocale } = useLocale();
-\treturn (
-\t\t<div className="mx-auto max-w-3xl space-y-4">
-\t\t\t<div>
-\t\t\t\t<h1 className="text-xl font-semibold tracking-tight">语言</h1>
-\t\t\t\t<p className="mt-1 text-sm text-ink-3">切换界面显示语言。设置会保存在当前桌面应用的本地存储中。</p>
-\t\t\t</div>
-\t\t\t<div className="rounded-md border border-line bg-paper p-4">
-\t\t\t\t<div className="space-y-2">
-\t\t\t\t\t<button
-\t\t\t\t\t\ttype="button"
-\t\t\t\t\t\tonClick={() => setLocale("zh-CN")}
-\t\t\t\t\t\tclassName={cn(
-\t\t\t\t\t\t\t"flex w-full items-center justify-between rounded-md border px-3 py-3 text-left transition-colors",
-\t\t\t\t\t\t\tlocale === "zh-CN" ? "border-accent bg-accent-soft/20 text-accent" : "border-line hover:bg-paper-2",
-\t\t\t\t\t\t)}
-\t\t\t\t\t>
-\t\t\t\t\t\t<span className="font-medium">简体中文</span>
-\t\t\t\t\t\t<span className="font-mono text-2xs text-ink-3">zh-CN</span>
-\t\t\t\t\t</button>
-\t\t\t\t\t<button
-\t\t\t\t\t\ttype="button"
-\t\t\t\t\t\tonClick={() => setLocale("en")}
-\t\t\t\t\t\tclassName={cn(
-\t\t\t\t\t\t\t"flex w-full items-center justify-between rounded-md border px-3 py-3 text-left transition-colors",
-\t\t\t\t\t\t\tlocale === "en" ? "border-accent bg-accent-soft/20 text-accent" : "border-line hover:bg-paper-2",
-\t\t\t\t\t\t)}
-\t\t\t\t\t>
-\t\t\t\t\t\t<span className="font-medium">English</span>
-\t\t\t\t\t\t<span className="font-mono text-2xs text-ink-3">en</span>
-\t\t\t\t\t</button>
-\t\t\t\t</div>
-\t\t\t</div>
-\t\t</div>
-\t);
-}
-
-function StubSection({ section }: { section: Exclude<SectionId, "env" | "messaging" | "appearance" | "notifications" | "language"> }) {`,
+		`${LANGUAGE_SECTION_CODE}\n\n${SETTINGS_STUB_SECTION_SIG}`,
 		"SettingsView: insert language section",
 	);
 	return next;
