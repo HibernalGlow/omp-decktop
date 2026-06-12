@@ -36,7 +36,7 @@
 		"dev": "bun run --filter '@omp-deck/server' --filter '@omp-deck/web' dev",
 		"dev:server": "bun run --filter '@omp-deck/server' dev",
 		"dev:web": "bun run --filter '@omp-deck/web' dev",
-		"dev:zh": "bun run l10n:prepare && bun run --filter '@omp-deck/web' dev:zh",
+		"dev:zh": "bun run l10n:prepare && bun run --filter '@omp-deck/server' --filter '@omp-deck/web' dev:zh",
 		"dev:telegram": "bun run --filter '@omp-deck/telegram-bridge' dev",
 		"build": "bun run --filter '@omp-deck/web' build && bun run --filter '@omp-deck/server' build",
 		"build:zh": "bun run l10n:prepare && bun run --filter '@omp-deck/web' build:zh",

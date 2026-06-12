@@ -304,6 +304,20 @@ const en = {
 		errorPrefix: "Setup error:",
 	},
 
+	// ── Session Picker ──────────────────────────────────────────────────
+	sessionPicker: {
+		startSession: "Start a session",
+		workspace: "Workspace",
+		newSession: "New session",
+		live: "Live",
+		recent: "Recent",
+		noPreviousSessions: "No previous sessions yet — start a new one above.",
+		welcomeTaskWaiting: 'is waiting in your kanban',
+		openTasks: "Open Tasks",
+		skippedOnboarding: "You skipped onboarding. Re-run it any time from",
+		onboardingLink: "Settings → Onboarding",
+	},
+
 	// ── Notifications ───────────────────────────────────────────────────
 	notifications: {
 		permission: {
