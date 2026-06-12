@@ -37,8 +37,8 @@ func main() {
 	// Create the Wails application. No embedded assets are needed because the
 	// window loads the Bun server URL directly.
 	app := application.New(application.Options{
-		Name:        "OMP Deck",
-		Description: "OMP Deck Desktop - AI agent management",
+		Name:        "omp-decktop",
+		Description: "omp-decktop - AI agent cockpit",
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
@@ -46,7 +46,7 @@ func main() {
 
 	// Create the main window pointing to the Bun server.
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:  "OMP Deck",
+		Title:  "omp-decktop",
 		Width:  1280,
 		Height: 800,
 		Mac: application.MacWindow{

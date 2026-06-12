@@ -110,16 +110,42 @@ func resolveRepoRoot() (string, error) {
 	return cwd, nil
 }
 
-// findBun locates the Bun executable on PATH.
+// findBun locates the Bun executable.
+// Search order:
+//  1. Bundled binary alongside the desktop exe (release zip layout).
+//  2. OMP_DECK_BUN_PATH environment variable.
+//  3. System PATH.
+//  4. Common install locations on Windows.
 func findBun() (string, error) {
+	exe, exeErr := os.Executable()
+	if exeErr == nil {
+		exeDir := filepath.Dir(exe)
+		// Release zip: bun.exe lives in bin/ next to the desktop exe.
+		bundled := filepath.Join(exeDir, "bin", "bun.exe")
+		if runtime.GOOS == "windows" {
+			if _, err := os.Stat(bundled); err == nil {
+				return bundled, nil
+			}
+		} else {
+			bundled = filepath.Join(exeDir, "bin", "bun")
+			if _, err := os.Stat(bundled); err == nil {
+				return bundled, nil
+			}
+		}
+	}
+
+	if envBun := os.Getenv("OMP_DECK_BUN_PATH"); envBun != "" {
+		if _, err := os.Stat(envBun); err == nil {
+			return envBun, nil
+		}
+	}
+
 	bunPath := "bun"
 	if runtime.GOOS == "windows" {
-		// On Windows, also try bun.exe
 		bunPath = "bun.exe"
 	}
 	path, err := exec.LookPath(bunPath)
 	if err != nil {
-		// Try common install locations on Windows
 		home, _ := os.UserHomeDir()
 		candidates := []string{
 			filepath.Join(home, ".bun", "bin", "bun.exe"),
