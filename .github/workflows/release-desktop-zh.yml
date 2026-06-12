@@ -73,30 +73,30 @@ jobs:
         run: |
           $release = "${{ env.APP_NAME }}-zh"
           New-Item -ItemType Directory -Force -Path "$release/apps/server/src"
-          New-Item -ItemType Directory -Force -Path "$release/apps/web"
+          New-Item -ItemType Directory -Force -Path "$release/apps/web/dist-zh"
           New-Item -ItemType Directory -Force -Path "$release/packages"
 
           # Desktop exe
           Copy-Item "apps\desktop\bin\${{ env.APP_NAME }}.exe" "$release/"
 
           # Server source + package.json (system Bun executes TS directly)
-          Copy-Item -Recurse "apps\server\src" "$release/apps/server/"
+          Copy-Item -Recurse -Path "apps\server\src\*" -Destination "$release/apps/server/src/"
           Copy-Item "apps\server\package.json" "$release/apps/server/"
 
           # Chinese web frontend
-          Copy-Item -Recurse "apps\web\dist-zh" "$release/apps/web/"
+          Copy-Item -Recurse -Path "apps\web\dist-zh\*" -Destination "$release/apps/web/dist-zh/"
 
           # Starter content
-          Copy-Item -Recurse "starter-skills" "$release/"
-          Copy-Item -Recurse "starter-extensions" "$release/"
+          Copy-Item -Recurse -Path "starter-skills" -Destination "$release/starter-skills"
+          Copy-Item -Recurse -Path "starter-extensions" -Destination "$release/starter-extensions"
 
           # Protocol workspace package
-          Copy-Item -Recurse "packages\protocol" "$release/packages/"
+          Copy-Item -Recurse -Path "packages\protocol" -Destination "$release/packages/protocol"
 
           # Root workspace config + node_modules for server runtime
           Copy-Item "package.json" "$release/"
           Copy-Item "tsconfig.base.json" "$release/"
-          Copy-Item -Recurse "node_modules" "$release/"
+          Copy-Item -Recurse -Path "node_modules" -Destination "$release/node_modules"
 
           # Launcher script
           "@echo off`r`ntitle omp-decktop`r`necho Starting omp-decktop...`r`necho Requires Bun >= 1.3.14 on PATH: https://bun.sh`r`nstart `"`" `"%~dp0${{ env.APP_NAME }}.exe`"" | Out-File -Encoding ASCII "$release/start.bat"
