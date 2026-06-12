@@ -93,13 +93,14 @@ jobs:
           # Protocol workspace package
           Copy-Item -Recurse -Path "packages\protocol" -Destination "$release/packages/protocol"
 
-          # Root workspace config + lockfile (for production install)
+          # Root workspace config (no lockfile — release is a partial workspace)
           Copy-Item "package.json" "$release/"
           Copy-Item "tsconfig.base.json" "$release/"
-          Copy-Item "bun.lock" "$release/"
 
           # Install only production dependencies (no Vite/React/Tailwind/devDeps)
+          # Disable CI auto-frozen-lockfile; partial workspace lockfile won't match
           Set-Location $release
+          $env:BUN_INSTALL_FROZEN = "0"
           bun install --production --ignore-scripts
           Set-Location ".."
 
