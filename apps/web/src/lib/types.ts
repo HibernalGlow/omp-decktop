@@ -208,6 +208,8 @@ export interface SessionUi {
 		reason: string;
 		action: string;
 		startedAt: number;
+		/** Status the session had *before* compaction started, restored on end. */
+		statusBefore?: SessionUi["status"];
 	};
 
 	ttsr?: {

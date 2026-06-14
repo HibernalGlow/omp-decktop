@@ -200,10 +200,17 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 					reason: String((event as any).reason ?? ""),
 					action: String((event as any).action ?? ""),
 					startedAt: Date.now(),
+					statusBefore: state.status,
 				},
 			};
 		case "auto_compaction_end": {
-			const next: SessionUi = { ...state, status: "streaming", compaction: undefined };
+			// Restore the status the session had *before* compaction started.
+			// If the SDK was mid-turn (status "streaming"), it will continue
+			// streaming after compaction.  If it was idle (manual compact or
+			// post-turn compaction), we must return to idle — not streaming —
+			// so the Stop/send buttons aren't stuck in "busy" state.
+			const restoredStatus = state.compaction?.statusBefore ?? "idle";
+			const next: SessionUi = { ...state, status: restoredStatus, compaction: undefined };
 			const result = (event as any).result;
 			if (result && typeof result === "object") {
 				const summary =
