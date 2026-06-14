@@ -1155,11 +1155,19 @@ function summarize(raw: any): SessionSummary {
 	const createdAt = String(raw.timestamp ?? raw.createdAt ?? raw.header?.timestamp ?? "");
 	const updatedAt = String(raw.modifiedAt ?? raw.updatedAt ?? createdAt);
 	const messageCount = Number(raw.messageCount ?? raw.count ?? 0);
+	// Extract preview text from the first user message when the SDK provides it.
+	// `raw.firstMessage` is populated by the SDK's `SessionManager.list()` and
+	// gives us a meaningful preview instead of falling back to hash IDs.
+	const preview =
+		typeof raw.firstMessage === "string" && raw.firstMessage !== "(no messages)"
+			? raw.firstMessage
+			: undefined;
 	return {
 		id,
 		path: filePath,
 		cwd,
 		title,
+		preview,
 		createdAt,
 		updatedAt,
 		messageCount,

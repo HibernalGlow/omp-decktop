@@ -135,7 +135,7 @@ export function Sidebar() {
 				{persisted.map((s) => (
 					<SessionRow
 						key={s.id}
-						title={s.title || formatSessionId(s.id)}
+						title={s.title || truncate(s.preview || "", 52) || formatSessionId(s.id)}
 						subtitle={`${s.messageCount} msgs · ${shortPath(s.cwd, 20)}`}
 						meta={formatRelative(s.updatedAt || s.createdAt)}
 						onClick={() => void handleResume(s.path)}

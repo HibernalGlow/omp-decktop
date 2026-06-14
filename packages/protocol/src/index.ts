@@ -30,6 +30,8 @@ export interface SessionSummary {
 	path: string;
 	cwd: string;
 	title?: string;
+	/** First user message text, used by the sidebar as a fallback title. */
+	preview?: string;
 	createdAt: string;
 	updatedAt: string;
 	messageCount: number;
