@@ -90,6 +90,26 @@ function writeOpenTabs(ids: string[]): void {
 	}
 }
 
+/** Read the last active session ID from localStorage so the chat resumes
+ *  after a full page reload (e.g. Vite HMR on background tab return). */
+function readActiveSessionId(): string | undefined {
+	try {
+		const raw = localStorage.getItem("omp-deck:active-session");
+		if (typeof raw === "string" && raw.length > 0) return raw;
+	} catch { /* private browsing / corrupt */ }
+	return undefined;
+}
+
+function writeActiveSessionId(id: string | undefined): void {
+	try {
+		if (id) {
+			localStorage.setItem("omp-deck:active-session", id);
+		} else {
+			localStorage.removeItem("omp-deck:active-session");
+		}
+	} catch { /* quota / private browsing */ }
+}
+
 interface StoreState {
 	ws: WsClient | null;
 	wsStatus: WsStatus;
@@ -250,6 +270,9 @@ export const useStore = create<StoreState>()(
 		sessions: [],
 		sessionsById: {},
 		subscribed: new Set<string>(),
+		// Restore last active session so the page survives Vite HMR full-reloads
+		// on background tab return (see store subscription below that persists it).
+		activeId: readActiveSessionId(),
 		toolView: { allCollapsed: false, perCard: {} },
 		tasksChangeCounter: 0,
 		skillsChangeCounter: 0,
@@ -266,6 +289,37 @@ export const useStore = create<StoreState>()(
 		async bootstrap() {
 			get().connect();
 			await Promise.all([get().refreshWorkspaces(), get().refreshSessions()]);
+			// If we have a persisted activeId from before a page reload (e.g. Vite
+			// HMR full-reload on background tab return), re-subscribe so the server
+			// pushes a fresh snapshot and subsequent events.
+			const activeId = get().activeId;
+			if (activeId && !get().subscribed.has(activeId)) {
+				get().ws?.send({ type: "subscribe", sessionId: activeId });
+				get().subscribed.add(activeId);
+			}
+			// Proactively check WS health when the tab becomes visible again.
+			// Browsers throttle timers and may kill WS connections in background
+			// tabs. Reconnecting early prevents a stale "open" status.
+			if (typeof document !== "undefined") {
+				document.addEventListener("visibilitychange", () => {
+					if (document.visibilityState !== "visible") return;
+					const ws = get().ws;
+					if (!ws) return;
+					// If the socket was closed while backgrounded, force reconnect.
+					if (ws.getStatus() === "closed") {
+						get().disconnect();
+						get().connect();
+						// Re-subscribe to active session after reconnect.
+						const aid = get().activeId;
+						if (aid && !get().subscribed.has(aid)) {
+							get().ws?.send({ type: "subscribe", sessionId: aid });
+							get().subscribed.add(aid);
+						}
+					}
+					// Refresh session list to pick up any changes while away.
+					void get().refreshSessions();
+				});
+			}
 		},
 
 		connect() {
@@ -507,6 +561,13 @@ export const useStore = create<StoreState>()(
 			});
 		},
 	})),
+);
+
+// Persist activeId to localStorage on every change so the chat survives
+// full page reloads (Vite HMR on background tab return, browser tab restore).
+useStore.subscribe(
+	(s) => s.activeId,
+	(activeId) => writeActiveSessionId(activeId),
 );
 
 function handleFrame(
