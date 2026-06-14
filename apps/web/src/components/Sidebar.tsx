@@ -235,8 +235,6 @@ function SessionRow({
 	planMode?: boolean;
 	onClick: () => void;
 }) {
-	const statusInfo = live && status ? STATUS_LABELS[status] : undefined;
-
 	return (
 		<button
 			type="button"
@@ -264,15 +262,17 @@ function SessionRow({
 			</div>
 
 			{/* Status badges row */}
-			{statusInfo || planMode ? (
+			{live && status && STATUS_LABELS[status] || planMode ? (
 				<div className="mt-0.5 flex items-center gap-1 pl-3">
-					{statusInfo ? (
-						<span className={cn("inline-flex h-4 items-center rounded px-1 font-mono text-[10px] uppercase tracking-meta", statusInfo.cls)}>
-							{statusInfo.label}
+					{live && status && STATUS_LABELS[status] ? (
+						<span className={cn("inline-flex h-4 items-center rounded px-1 font-mono text-[10px] uppercase tracking-meta", STATUS_LABELS[status]!.cls)}>
+							{STATUS_LABELS[status]!.label}
 						</span>
 					) : null}
 					{planMode ? (
-						<span className="inline-flex h-4 items-center rounded border border-thinking/40 bg-thinking/10 px-1 font-mono text-[10px] uppercase tracking-meta text-thinking">
+						<span className="inline-flex h-4 items-center rounded border border-thinking/40 bg-thinking/10 px-1 font-mono text-[10px] uppercase tracking-meta text-thinking"
+							title="Plan mode active"
+						>
 							plan
 						</span>
 					) : null}
