@@ -1723,3 +1723,63 @@ export interface OAuthPromptReplyRequest {
 	promptId: string;
 	answer: string;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cc-switch DB import (read provider configs from cc-switch SQLite database)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One provider record read from the cc-switch `providers` table. */
+export interface CcSwitchProvider {
+	/** cc-switch composite key: id + app_type. */
+	id: string;
+	appType: string;
+	name: string;
+	/** Whether this is the currently active provider in cc-switch for its app_type. */
+	isCurrent: boolean;
+	category: string | null;
+	providerType: string | null;
+	websiteUrl: string | null;
+	/** Parsed env vars from settings_config.env (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, etc.) */
+	env: Record<string, string>;
+	/** Parsed meta JSON (contains apiFormat, etc.) */
+	meta: Record<string, unknown>;
+	/** Mapped SDK api type: openai-completions | anthropic-messages | openai-responses */
+	apiType: string | null;
+}
+
+/** Response for GET /api/ccswitch/providers */
+export interface CcSwitchListResponse {
+	/** Absolute path of the cc-switch database file. */
+	dbPath: string;
+	/** Whether the database file exists and is readable. */
+	accessible: boolean;
+	providers: CcSwitchProvider[];
+	/** Error message when accessible=false. */
+	error?: string;
+}
+
+/** Request body for POST /api/ccswitch/import */
+export interface CcSwitchImportRequest {
+	/** Array of cc-switch provider composite keys (id + "|" + app_type) to import. */
+	providerKeys: string[];
+	/** cc-switch DB path; defaults to ~/.cc-switch/cc-switch.db */
+	dbPath?: string;
+}
+
+/** Result of importing one cc-switch provider as an omp extension. */
+export interface CcSwitchImportResultEntry {
+	key: string;
+	name: string;
+	status: "ok" | "skipped" | "error";
+	extensionDir?: string;
+	error?: string;
+}
+
+/** Response for POST /api/ccswitch/import */
+export interface CcSwitchImportResponse {
+	imported: CcSwitchImportResultEntry[];
+	/** Total providers successfully written as extensions. */
+	okCount: number;
+	/** Total providers that failed. */
+	errorCount: number;
+}

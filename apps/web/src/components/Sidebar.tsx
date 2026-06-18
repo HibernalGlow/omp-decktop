@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { ArrowDownNarrowWide, ArrowUpNarrowWide, Plus, RefreshCw } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn, shortPath, truncate, formatTokens, formatCost } from "@/lib/utils";
-import type { SessionUi, UserMsg } from "@/lib/types";
+import type { SessionUi, UserMsg, AssistantMsg } from "@/lib/types";
 
 export function Sidebar() {
 	const workspaces = useStore((s) => s.workspaces);
@@ -17,6 +17,16 @@ export function Sidebar() {
 
 	const [selectedCwd, setSelectedCwd] = useState<string | "">("");
 	const [creating, setCreating] = useState(false);
+	/** "last" (default) shows the latest message; "first" shows the original prompt. */
+	const [titleMode, setTitleMode] = useState<"first" | "last">(
+		() => (localStorage.getItem("omp-deck:title-mode") === "first" ? "first" : "last"),
+	);
+
+	function toggleTitleMode(): void {
+		const next = titleMode === "first" ? "last" : "first";
+		setTitleMode(next);
+		try { localStorage.setItem("omp-deck:title-mode", next); } catch {}
+	}
 
 	const cwdInUse = selectedCwd || defaultCwd;
 
@@ -97,7 +107,21 @@ export function Sidebar() {
 			</div>
 
 			<div className="flex items-center justify-between px-3 pt-3 pb-1">
-				<div className="meta">Sessions · {filtered.length}</div>
+				<div className="flex items-center gap-1.5">
+					<div className="meta">Sessions · {filtered.length}</div>
+					<button
+						type="button"
+						className="text-ink-4 hover:text-ink-2"
+						onClick={toggleTitleMode}
+						title={titleMode === "last" ? "Showing last message — click to show first" : "Showing first message — click to show last"}
+					>
+						{titleMode === "last" ? (
+							<ArrowDownNarrowWide className="h-3 w-3" />
+						) : (
+							<ArrowUpNarrowWide className="h-3 w-3" />
+						)}
+					</button>
+				</div>
 				<button
 					type="button"
 					className="text-ink-3 hover:text-ink"
@@ -110,8 +134,10 @@ export function Sidebar() {
 
 			<div className="flex-1 overflow-y-auto px-1 pb-3">
 				{liveSessions.map((s) => {
-					const firstMsg = firstUserMessage(s);
-					const title = s.sessionName || firstMsg || formatSessionId(s.sessionId);
+					const fallback = titleMode === "last"
+						? (lastConversationMessage(s) || firstUserMessage(s))
+						: (firstUserMessage(s) || lastConversationMessage(s));
+					const title = s.sessionName || fallback || formatSessionId(s.sessionId);
 					const meta = buildLiveMeta(s);
 					return (
 						<SessionRow
@@ -163,6 +189,30 @@ function firstUserMessage(s: SessionUi): string {
 			const um = m as UserMsg;
 			const text = um.text.replace(/\n/g, " ").trim();
 			if (text) return truncate(text, 52);
+		}
+	}
+	return "";
+}
+
+/**
+ * Extract the last meaningful conversation message (user or assistant)
+ * from a live session. Walks backward so the most recent exchange wins.
+ */
+function lastConversationMessage(s: SessionUi): string {
+	for (let i = s.messages.length - 1; i >= 0; i--) {
+		const m = s.messages[i];
+		if (!m) continue;
+		if (m.role === "user") {
+			const text = (m as UserMsg).text.replace(/\n/g, " ").trim();
+			if (text) return truncate(text, 52);
+		}
+		if (m.role === "assistant") {
+			const am = m as AssistantMsg;
+			const textBlock = am.blocks.find((b) => b.type === "text");
+			if (textBlock?.type === "text") {
+				const text = textBlock.text.replace(/\n/g, " ").trim();
+				if (text) return truncate(text, 52);
+			}
 		}
 	}
 	return "";
